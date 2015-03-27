@@ -356,11 +356,11 @@ func (s *router) getImagesSearch(ctx context.Context, w http.ResponseWriter, r *
 			headers[k] = v
 		}
 	}
-	query, err := s.daemon.SearchRegistryForImages(term, authConfigs, headers)
+	results, err := s.daemon.SearchRegistryForImages(term, authConfigs, headers, httputils.BoolValue(r, "noIndex"))
 	if err != nil {
 		return err
 	}
-	return httputils.WriteJSON(w, http.StatusOK, query.Results)
+	return httputils.WriteJSON(w, http.StatusOK, results)
 }
 
 func isAuthorizedError(err error) bool {
