@@ -8,6 +8,7 @@ docker-search - Search the Docker Hub for images
 **docker search**
 [**--automated**]
 [**--help**]
+[**--no-index**]
 [**--no-trunc**]
 [**-s**|**--stars**[=*0*]]
 TERM
@@ -66,4 +67,3 @@ April 2014, Originally compiled by William Henry (whenry at redhat dot com)
 based on docker.com source material and internal work.
 June 2014, updated by Sven Dowideit <SvenDowideit@home.org.au>
 April 2015, updated by Mary Anthony for v2 <mary@docker.com>
-
