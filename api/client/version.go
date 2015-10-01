@@ -10,12 +10,14 @@ import (
 	"github.com/docker/docker/autogen/dockerversion"
 	Cli "github.com/docker/docker/cli"
 	flag "github.com/docker/docker/pkg/mflag"
+	"github.com/docker/docker/pkg/rpm"
 	"github.com/docker/docker/utils"
 )
 
 var versionTemplate = `Client:
  Version:      {{.Client.Version}}
  API version:  {{.Client.APIVersion}}
+ Package Version: {{.Client.PackageVersion}}
  Go version:   {{.Client.GoVersion}}
  Git commit:   {{.Client.GitCommit}}
  Built:        {{.Client.BuildTime}}
@@ -25,6 +27,7 @@ var versionTemplate = `Client:
 Server:
  Version:      {{.Server.Version}}
  API version:  {{.Server.APIVersion}}
+ Package Version: {{.Server.PackageVersion}}
  Go version:   {{.Server.GoVersion}}
  Git commit:   {{.Server.GitCommit}}
  Built:        {{.Server.BuildTime}}
@@ -58,16 +61,18 @@ func (cli *DockerCli) CmdVersion(args ...string) (err error) {
 			Status: "Template parsing error: " + err.Error()}
 	}
 
+	pkgVersion, _ := rpm.Version("/usr/bin/docker")
 	vd := versionData{
 		Client: types.Version{
-			Version:      dockerversion.VERSION,
-			APIVersion:   api.Version,
-			GoVersion:    runtime.Version(),
-			GitCommit:    dockerversion.GITCOMMIT,
-			BuildTime:    dockerversion.BUILDTIME,
-			Os:           runtime.GOOS,
-			Arch:         runtime.GOARCH,
-			Experimental: utils.ExperimentalBuild(),
+			Version:        dockerversion.VERSION,
+			APIVersion:     api.Version,
+			GoVersion:      runtime.Version(),
+			GitCommit:      dockerversion.GITCOMMIT,
+			BuildTime:      dockerversion.BUILDTIME,
+			Os:             runtime.GOOS,
+			Arch:           runtime.GOARCH,
+			Experimental:   utils.ExperimentalBuild(),
+			PackageVersion: pkgVersion,
 		},
 	}
 
