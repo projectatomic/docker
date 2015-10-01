@@ -167,15 +167,16 @@ type ContainerProcessList struct {
 // Version contains response of Remote API:
 // GET "/version"
 type Version struct {
-	Version       string
-	APIVersion    version.Version `json:"ApiVersion"`
-	GitCommit     string
-	GoVersion     string
-	Os            string
-	Arch          string
-	KernelVersion string `json:",omitempty"`
-	Experimental  bool   `json:",omitempty"`
-	BuildTime     string `json:",omitempty"`
+	Version        string
+	APIVersion     version.Version `json:"ApiVersion"`
+	GitCommit      string
+	GoVersion      string
+	Os             string
+	Arch           string
+	KernelVersion  string `json:",omitempty"`
+	Experimental   bool   `json:",omitempty"`
+	BuildTime      string `json:",omitempty"`
+	PackageVersion string `json:",omitempty"`
 }
 
 // Info contains response of Remote API:
