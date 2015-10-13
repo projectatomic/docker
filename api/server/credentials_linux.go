@@ -18,6 +18,7 @@ import (
 	"github.com/Sirupsen/logrus"
 	"github.com/docker/docker/api/types"
 	"github.com/docker/docker/daemon"
+	"github.com/docker/docker/pkg/audit"
 )
 
 //Gets the file descriptor
@@ -26,16 +27,40 @@ func getFdFromWriter(w http.ResponseWriter) int {
 	//connection from the ResponseWriter object
 	//This is because the connection object is not exported by the writer.
 	writerVal := reflect.Indirect(reflect.ValueOf(w))
+	if writerVal.Kind() != reflect.Struct {
+		logrus.Warn("ResponseWriter is not a struct")
+		return -1
+	}
 	//Get the underlying http connection
 	httpconn := writerVal.FieldByName("conn")
+	if !httpconn.IsValid() {
+		logrus.Warn("ResponseWriter does not contain a field named conn")
+		return -1
+	}
 	httpconnVal := reflect.Indirect(httpconn)
+	if httpconnVal.Kind() != reflect.Struct {
+		logrus.Warn("conn is not an interface to a struct")
+		return -1
+	}
 	//Get the underlying tcp connection
 	rwcPtr := httpconnVal.FieldByName("rwc").Elem()
 	rwc := reflect.Indirect(rwcPtr)
+	if rwc.Kind() != reflect.Struct {
+		logrus.Warn("conn is not an interface to a struct")
+		return -1
+	}
 	tcpconn := reflect.Indirect(rwc.FieldByName("conn"))
 	//Grab the underyling netfd
+	if tcpconn.Kind() != reflect.Struct {
+		logrus.Warn("tcpconn is not a struct")
+		return -1
+	}
 	netfd := reflect.Indirect(tcpconn.FieldByName("fd"))
 	//Grab sysfd
+	if netfd.Kind() != reflect.Struct {
+		logrus.Warn("fd is not a struct")
+		return -1
+	}
 	sysfd := netfd.FieldByName("sysfd")
 	//Finally, we have the fd
 	return int(sysfd.Int())
@@ -100,11 +125,13 @@ func (s *Server) parseRequest(r *http.Request) (string, *daemon.Container) {
 		containerID = path.Base(path.Dir(parsedurl.Path))
 	}
 
-	c, err := s.daemon.Get(containerID)
-	if err != nil {
-		return action, nil
+	if s.daemon != nil {
+		c, err := s.daemon.Get(containerID)
+		if err == nil {
+			return action, c
+		}
 	}
-	return action, c
+	return action, nil
 }
 
 //Traverses the config struct and grabs non-standard values for logging
@@ -142,18 +169,17 @@ func generateContainerConfigMsg(c *daemon.Container, j *types.ContainerJSON) str
 
 //LogAction logs a docker API function and records the user that initiated the request using the authentication results
 func (s *Server) LogAction(w http.ResponseWriter, r *http.Request) error {
-	var (
-		message  string
-		username string
-		loginuid int
-	)
+	var message string
+
 	action, c := s.parseRequest(r)
 
 	switch action {
 	case "start":
-		inspect, err := s.daemon.ContainerInspect(c.ID, false)
-		if err == nil {
-			message = ", " + generateContainerConfigMsg(c, inspect)
+		if s.daemon != nil {
+			inspect, err := s.daemon.ContainerInspect(c.ID, false)
+			if err == nil {
+				message = ", " + generateContainerConfigMsg(c, inspect)
+			}
 		}
 		fallthrough
 	default:
@@ -211,4 +237,51 @@ func logSyslog(message string) {
 	}
 	logger.Info(message)
 	logger.Close()
+}
+
+//Logs an API event to the audit log
+func logAuditlog(c *daemon.Container, action string, username string, loginuid int, success bool) {
+	virt := audit.AUDIT_VIRT_CONTROL
+	vm := "?"
+	vmPid := "?"
+	exe := "?"
+	hostname := "?"
+	user := "?"
+	auid := "?"
+
+	if c != nil {
+		vm = c.Config.Image
+		vmPid = fmt.Sprint(c.State.Pid)
+		exe = c.Path
+		hostname = c.Config.Hostname
+	}
+
+	if username != "" {
+		user = username
+	}
+
+	if loginuid != -1 {
+		auid = fmt.Sprint(loginuid)
+	}
+
+	vars := map[string]string{
+		"op":       action,
+		"reason":   "api",
+		"vm":       vm,
+		"vm-pid":   vmPid,
+		"user":     user,
+		"auid":     auid,
+		"exe":      exe,
+		"hostname": hostname,
+	}
+
+	//Encoding is a function of libaudit that ensures
+	//that the audit values contain only approved characters.
+	for key, value := range vars {
+		if audit.AuditValueNeedsEncoding(value) {
+			vars[key] = audit.AuditEncodeNVString(key, value)
+		}
+	}
+	message := audit.AuditFormatVars(vars)
+	audit.AuditLogUserEvent(virt, message, success)
 }
