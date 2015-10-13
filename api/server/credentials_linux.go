@@ -18,6 +18,7 @@ import (
 	"github.com/Sirupsen/logrus"
 	"github.com/docker/docker/api/types"
 	"github.com/docker/docker/daemon"
+	"github.com/docker/docker/pkg/audit"
 )
 
 //Gets the file descriptor
@@ -142,11 +143,8 @@ func generateContainerConfigMsg(c *daemon.Container, j *types.ContainerJSON) str
 
 //LogAction logs a docker API function and records the user that initiated the request using the authentication results
 func (s *Server) LogAction(w http.ResponseWriter, r *http.Request) error {
-	var (
-		message  string
-		username string
-		loginuid int
-	)
+	var message string
+
 	action, c := s.parseRequest(r)
 
 	switch action {
@@ -211,4 +209,51 @@ func logSyslog(message string) {
 	}
 	logger.Info(message)
 	logger.Close()
+}
+
+//Logs an API event to the audit log
+func logAuditlog(c *daemon.Container, action string, username string, loginuid int, success bool) {
+	virt := audit.AUDIT_VIRT_CONTROL
+	vm := "?"
+	vmPid := "?"
+	exe := "?"
+	hostname := "?"
+	user := "?"
+	auid := "?"
+
+	if c != nil {
+		vm = c.Config.Image
+		vmPid = fmt.Sprint(c.State.Pid)
+		exe = c.Path
+		hostname = c.Config.Hostname
+	}
+
+	if username != "" {
+		user = username
+	}
+
+	if loginuid != -1 {
+		auid = fmt.Sprint(loginuid)
+	}
+
+	vars := map[string]string{
+		"op":       action,
+		"reason":   "api",
+		"vm":       vm,
+		"vm-pid":   vmPid,
+		"user":     user,
+		"auid":     auid,
+		"exe":      exe,
+		"hostname": hostname,
+	}
+
+	//Encoding is a function of libaudit that ensures
+	//that the audit values contain only approved characters.
+	for key, value := range vars {
+		if audit.AuditValueNeedsEncoding(value) {
+			vars[key] = audit.AuditEncodeNVString(key, value)
+		}
+	}
+	message := audit.AuditFormatVars(vars)
+	audit.AuditLogUserEvent(virt, message, success)
 }
