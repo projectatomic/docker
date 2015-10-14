@@ -2,6 +2,8 @@
     "distribution": "FROM fedora",
     "dependencies":[
       "  RUN dnf -y update && dnf install -y \\",
+      "  audit-libs-devel \\",
+      "  audit-libs-static \\",
       "  binutils \\",
       "  btrfs-progs-devel \\",
       "  btrfs-progs \\",
