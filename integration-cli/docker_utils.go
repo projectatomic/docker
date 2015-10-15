@@ -393,7 +393,7 @@ func (d *Daemon) getImages(c *check.C, args ...string) map[string]*localImageEnt
 	reImageEntry := regexp.MustCompile(`(?m)^([[:alnum:]/.:_-]+)\s+([[:alnum:]._-]+)\s+([a-fA-F0-9]+)\s+`)
 	result := make(map[string]*localImageEntry)
 
-	out, err := d.Cmd("images", args...)
+	out, err := d.Cmd("images", append([]string{"--no-trunc"}, args...)...)
 	if err != nil {
 		c.Fatalf("failed to list images: %v", err)
 	}
@@ -449,6 +449,77 @@ func (d *Daemon) inspectField(name, field string) (string, error) {
 		return "", fmt.Errorf("failed to inspect %s: %s", name, out)
 	}
 	return strings.TrimSpace(out), nil
+}
+
+func (d *Daemon) sockConn(timeout time.Duration) (net.Conn, error) {
+	daemon := d.sock()
+	daemonURL, err := url.Parse(daemon)
+	if err != nil {
+		return nil, fmt.Errorf("could not parse url %q: %v", daemon, err)
+	}
+
+	var c net.Conn
+	switch daemonURL.Scheme {
+	case "unix":
+		return net.DialTimeout(daemonURL.Scheme, daemonURL.Path, timeout)
+	case "tcp":
+		return net.DialTimeout(daemonURL.Scheme, daemonURL.Host, timeout)
+	default:
+		return c, fmt.Errorf("unknown scheme %v (%s)", daemonURL.Scheme, daemon)
+	}
+}
+
+func (d *Daemon) sockRequest(method, endpoint string, data interface{}) (int, []byte, error) {
+	jsonData := bytes.NewBuffer(nil)
+	if err := json.NewEncoder(jsonData).Encode(data); err != nil {
+		return -1, nil, err
+	}
+
+	res, body, err := d.sockRequestRaw(method, endpoint, jsonData, "application/json")
+	if err != nil {
+		return -1, nil, err
+	}
+	b, err := readBody(body)
+	return res.StatusCode, b, err
+}
+
+func (d *Daemon) sockRequestRaw(method, endpoint string, data io.Reader, ct string) (*http.Response, io.ReadCloser, error) {
+	req, client, err := d.newRequestClient(method, endpoint, data, ct)
+	if err != nil {
+		return nil, nil, err
+	}
+
+	resp, err := client.Do(req)
+	if err != nil {
+		client.Close()
+		return nil, nil, err
+	}
+	body := ioutils.NewReadCloserWrapper(resp.Body, func() error {
+		defer resp.Body.Close()
+		return client.Close()
+	})
+
+	return resp, body, nil
+}
+
+func (d *Daemon) newRequestClient(method, endpoint string, data io.Reader, ct string) (*http.Request, *httputil.ClientConn, error) {
+	c, err := d.sockConn(time.Duration(10 * time.Second))
+	if err != nil {
+		return nil, nil, fmt.Errorf("could not dial docker daemon: %v", err)
+	}
+
+	client := httputil.NewClientConn(c, nil)
+
+	req, err := http.NewRequest(method, endpoint, data)
+	if err != nil {
+		client.Close()
+		return nil, nil, fmt.Errorf("could not create new request: %v", err)
+	}
+
+	if ct != "" {
+		req.Header.Set("Content-Type", ct)
+	}
+	return req, client, nil
 }
 
 func daemonHost() string {
