@@ -27,16 +27,40 @@ func getFdFromWriter(w http.ResponseWriter) int {
 	//connection from the ResponseWriter object
 	//This is because the connection object is not exported by the writer.
 	writerVal := reflect.Indirect(reflect.ValueOf(w))
+	if writerVal.Kind() != reflect.Struct {
+		logrus.Warn("ResponseWriter is not a struct")
+		return -1
+	}
 	//Get the underlying http connection
 	httpconn := writerVal.FieldByName("conn")
+	if !httpconn.IsValid() {
+		logrus.Warn("ResponseWriter does not contain a field named conn")
+		return -1
+	}
 	httpconnVal := reflect.Indirect(httpconn)
+	if httpconnVal.Kind() != reflect.Struct {
+		logrus.Warn("conn is not an interface to a struct")
+		return -1
+	}
 	//Get the underlying tcp connection
 	rwcPtr := httpconnVal.FieldByName("rwc").Elem()
 	rwc := reflect.Indirect(rwcPtr)
+	if rwc.Kind() != reflect.Struct {
+		logrus.Warn("conn is not an interface to a struct")
+		return -1
+	}
 	tcpconn := reflect.Indirect(rwc.FieldByName("conn"))
 	//Grab the underyling netfd
+	if tcpconn.Kind() != reflect.Struct {
+		logrus.Warn("tcpconn is not a struct")
+		return -1
+	}
 	netfd := reflect.Indirect(tcpconn.FieldByName("fd"))
 	//Grab sysfd
+	if netfd.Kind() != reflect.Struct {
+		logrus.Warn("fd is not a struct")
+		return -1
+	}
 	sysfd := netfd.FieldByName("sysfd")
 	//Finally, we have the fd
 	return int(sysfd.Int())
@@ -101,11 +125,13 @@ func (s *Server) parseRequest(r *http.Request) (string, *daemon.Container) {
 		containerID = path.Base(path.Dir(parsedurl.Path))
 	}
 
-	c, err := s.daemon.Get(containerID)
-	if err != nil {
-		return action, nil
+	if s.daemon != nil {
+		c, err := s.daemon.Get(containerID)
+		if err == nil {
+			return action, c
+		}
 	}
-	return action, c
+	return action, nil
 }
 
 //Traverses the config struct and grabs non-standard values for logging
@@ -149,9 +175,11 @@ func (s *Server) LogAction(w http.ResponseWriter, r *http.Request) error {
 
 	switch action {
 	case "start":
-		inspect, err := s.daemon.ContainerInspect(c.ID, false)
-		if err == nil {
-			message = ", " + generateContainerConfigMsg(c, inspect)
+		if s.daemon != nil {
+			inspect, err := s.daemon.ContainerInspect(c.ID, false)
+			if err == nil {
+				message = ", " + generateContainerConfigMsg(c, inspect)
+			}
 		}
 		fallthrough
 	default:
