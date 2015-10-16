@@ -76,12 +76,6 @@ while [ $# -gt 0 ]; do
 
 		curl -sSL -H "Authorization: Token $token" "https://registry-1.docker.io/v1/images/$imageId/json" -o "$dir/$imageId/json"
 
-		# Hack until this is fixed upstream. The "Cmd" config is sometimes set
-		# to null even if it actually should be present, e.g. busybox. It works
-		# fine if you directly docker pull it, but when we load it the way we do
-		# here, it loses its Cmd.
-		sed -i -e 's/ "Cmd": null, / "Cmd": ["sh"], /' "$dir/$imageId/json"
-
 		# TODO figure out why "-C -" doesn't work here
 		# "curl: (33) HTTP server doesn't seem to support byte ranges. Cannot resume."
 		# "HTTP/1.1 416 Requested Range Not Satisfiable"

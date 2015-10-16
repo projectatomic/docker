@@ -200,7 +200,7 @@ COPY contrib/download-frozen-image.sh /go/src/github.com/docker/docker/contrib/
 # Original image id:
 # busybox:latest@8c2e06607696bd4afb3d03b687e361cc43cf8ec1a4a725bc96e39f05ba97dd55 \
 RUN ./contrib/download-frozen-image.sh /docker-frozen-images \
-	busybox:latest@718495ebac5cf88bf00a7d01f89821cdd9f55bca7133c5766da2dac1b3a60356 \
+	busybox:latest@0064fda8c45ded4e3a4ac6d46e1f0d565697195d905960caabfe0e454f2fdfde \
 	hello-world:frozen@91c95931e552b11604fea91c2f537284149ec32fff0f700a4769cfd31d7696ae \
 	jess/unshare@5c9f6ea50341a2a8eb6677527f2bdedbf331ae894a41714fda770fb130f3314d
 # see also "hack/make/.ensure-frozen-images" (which needs to be updated any time this list is)
