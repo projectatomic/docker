@@ -15,24 +15,24 @@ import (
 )
 
 var versionTemplate = `Client:
- Version:      {{.Client.Version}}
- API version:  {{.Client.APIVersion}}
- Package Version: {{.Client.PackageVersion}}
- Go version:   {{.Client.GoVersion}}
- Git commit:   {{.Client.GitCommit}}
- Built:        {{.Client.BuildTime}}
- OS/Arch:      {{.Client.Os}}/{{.Client.Arch}}{{if .Client.Experimental}}
- Experimental: {{.Client.Experimental}}{{end}}{{if .ServerOK}}
+ Version:         {{.Client.Version}}
+ API version:     {{.Client.APIVersion}}
+ Package version: {{.Client.PackageVersion}}
+ Go version:      {{.Client.GoVersion}}
+ Git commit:      {{.Client.GitCommit}}
+ Built:           {{.Client.BuildTime}}
+ OS/Arch:         {{.Client.Os}}/{{.Client.Arch}}{{if .Client.Experimental}}
+ Experimental:    {{.Client.Experimental}}{{end}}{{if .ServerOK}}
 
 Server:
- Version:      {{.Server.Version}}
- API version:  {{.Server.APIVersion}}
- Package Version: {{.Server.PackageVersion}}
- Go version:   {{.Server.GoVersion}}
- Git commit:   {{.Server.GitCommit}}
- Built:        {{.Server.BuildTime}}
- OS/Arch:      {{.Server.Os}}/{{.Server.Arch}}{{if .Server.Experimental}}
- Experimental: {{.Server.Experimental}}{{end}}{{end}}`
+ Version:         {{.Server.Version}}
+ API version:     {{.Server.APIVersion}}
+ Package version: {{.Server.PackageVersion}}
+ Go version:      {{.Server.GoVersion}}
+ Git commit:      {{.Server.GitCommit}}
+ Built:           {{.Server.BuildTime}}
+ OS/Arch:         {{.Server.Os}}/{{.Server.Arch}}{{if .Server.Experimental}}
+ Experimental:    {{.Server.Experimental}}{{end}}{{end}}`
 
 type versionData struct {
 	Client   types.Version
