@@ -32,12 +32,12 @@ func (s *DockerSuite) TestRmiWithContainerFails(c *check.C) {
 	}
 
 	// create a container
-	out, _ := dockerCmd(c, "run", "-d", "busybox", "true")
+	out, _ = dockerCmd(c, "run", "-d", "busybox", "true")
 
 	cleanedContainerID := strings.TrimSpace(out)
 
 	// try to delete the image
-	out, _, err := dockerCmdWithError("rmi", "busybox")
+	out, _, err = dockerCmdWithError("rmi", "busybox")
 	// Container is using image, should not be able to rmi
 	c.Assert(err, checker.NotNil)
 	// Container is using image, error message should contain errSubstr
