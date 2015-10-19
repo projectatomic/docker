@@ -169,7 +169,11 @@ func generateContainerConfigMsg(c *daemon.Container, j *types.ContainerJSON) str
 
 //LogAction logs a docker API function and records the user that initiated the request using the authentication results
 func (s *Server) LogAction(w http.ResponseWriter, r *http.Request) error {
-	var message string
+	var (
+		message  string
+		username string
+		loginuid int = -1
+	)
 
 	action, c := s.parseRequest(r)
 
@@ -205,14 +209,15 @@ func (s *Server) LogAction(w http.ResponseWriter, r *http.Request) error {
 		message = fmt.Sprintf("PID=%v", ucred.Pid) + message
 
 		//Get user loginuid
-		loginuid, err := getLoginUID(ucred, fd)
+		uid, err := getLoginUID(ucred, fd)
 		if err != nil {
 			break
 		}
-		message = fmt.Sprintf("LoginUID=%v, %s", loginuid, message)
+		message = fmt.Sprintf("LoginUID=%v, %s", uid, message)
+		loginuid = int(uid)
 
 		//Get username
-		username, err := getpwuid(loginuid)
+		username, err = getpwuid(uid)
 		if err != nil {
 			break
 		}
@@ -225,6 +230,7 @@ func (s *Server) LogAction(w http.ResponseWriter, r *http.Request) error {
 	}
 	message = fmt.Sprintf("{Action=%v, %s}", action, message)
 	logSyslog(message)
+	logAuditlog(c, action, username, loginuid, true)
 	return nil
 }
 
