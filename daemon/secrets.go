@@ -6,17 +6,20 @@ import (
 	"path/filepath"
 )
 
+// Secret info
 type Secret struct {
 	Name      string
 	IsDir     bool
 	HostBased bool
 }
 
+// SecretData info
 type SecretData struct {
 	Name string
 	Data []byte
 }
 
+// SaveTo saves secret data to given directory
 func (s SecretData) SaveTo(dir string) error {
 	path := filepath.Join(dir, s.Name)
 	if err := os.MkdirAll(filepath.Dir(path), 0755); err != nil && !os.IsExist(err) {
@@ -72,13 +75,12 @@ func readFile(root, name string) ([]SecretData, error) {
 			return nil, err
 		}
 		return dirData, nil
-	} else {
-		bytes, err := ioutil.ReadFile(path)
-		if err != nil {
-			return nil, err
-		}
-		return []SecretData{{Name: name, Data: bytes}}, nil
 	}
+	bytes, err := ioutil.ReadFile(path)
+	if err != nil {
+		return nil, err
+	}
+	return []SecretData{{Name: name, Data: bytes}}, nil
 }
 
 func getHostSecretData() ([]SecretData, error) {

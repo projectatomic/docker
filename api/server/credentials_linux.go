@@ -241,7 +241,7 @@ func logSyslog(message string) {
 
 //Logs an API event to the audit log
 func logAuditlog(c *daemon.Container, action string, username string, loginuid int, success bool) {
-	virt := audit.AUDIT_VIRT_CONTROL
+	virt := audit.AuditVertControl
 	vm := "?"
 	vmPid := "?"
 	exe := "?"
@@ -278,10 +278,10 @@ func logAuditlog(c *daemon.Container, action string, username string, loginuid i
 	//Encoding is a function of libaudit that ensures
 	//that the audit values contain only approved characters.
 	for key, value := range vars {
-		if audit.AuditValueNeedsEncoding(value) {
-			vars[key] = audit.AuditEncodeNVString(key, value)
+		if audit.ValueNeedsEncoding(value) {
+			vars[key] = audit.EncodeNVString(key, value)
 		}
 	}
-	message := audit.AuditFormatVars(vars)
-	audit.AuditLogUserEvent(virt, message, success)
+	message := audit.FormatVars(vars)
+	audit.LogUserEvent(virt, message, success)
 }
