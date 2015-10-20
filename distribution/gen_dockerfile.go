@@ -10,6 +10,7 @@ import (
 	"strings"
 )
 
+// DfileConfig holds info for distribution-specific Dockerfile
 type DfileConfig struct {
 	Distribution  string   `json:"distribution"`
 	Dependencies  []string `json:"dependencies"`
@@ -29,8 +30,8 @@ func genOS() (string, error) {
 		return "Dockerfile", nil
 	}
 	line := strings.Split(string(file), " ")
-	os_str := line[0]
-	switch os_str {
+	osStr := line[0]
+	switch osStr {
 	case "Fedora":
 		return "Fedora", nil
 	case "CentOS":
@@ -52,11 +53,11 @@ func patchLines(patched string, original string, osName string) error {
 	w := bufio.NewWriter(patchedFile)
 	defer w.Flush()
 	dfConfig := new(DfileConfig)
-	patchJson := fmt.Sprintf("distribution/%s.json", osName)
-	patchJsonFile, err := os.Open(patchJson)
+	patchJSON := fmt.Sprintf("distribution/%s.json", osName)
+	patchJSONFile, err := os.Open(patchJSON)
 	check(err)
-	defer patchJsonFile.Close()
-	jsonParser := json.NewDecoder(patchJsonFile)
+	defer patchJSONFile.Close()
+	jsonParser := json.NewDecoder(patchJSONFile)
 	check(err)
 	err = jsonParser.Decode(&dfConfig)
 	check(err)

@@ -5,6 +5,7 @@ import (
 	"strings"
 )
 
+// Version returns package version or error
 func Version(name string) (string, error) {
 	var (
 		err    error
