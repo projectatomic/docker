@@ -15,19 +15,22 @@ import (
 	"github.com/docker/docker/pkg/jsonmessage"
 	"github.com/docker/docker/pkg/parsers/filters"
 	"github.com/docker/docker/pkg/parsers/kernel"
+	"github.com/docker/docker/pkg/rpm"
 	"github.com/docker/docker/utils"
 	"golang.org/x/net/context"
 )
 
 func (s *router) getVersion(ctx context.Context, w http.ResponseWriter, r *http.Request, vars map[string]string) error {
+	pkgVersion, _ := rpm.Version("/usr/bin/docker")
 	v := &types.Version{
-		Version:    dockerversion.VERSION,
-		APIVersion: api.Version,
-		GitCommit:  dockerversion.GITCOMMIT,
-		GoVersion:  runtime.Version(),
-		Os:         runtime.GOOS,
-		Arch:       runtime.GOARCH,
-		BuildTime:  dockerversion.BUILDTIME,
+		Version:        dockerversion.VERSION,
+		APIVersion:     api.Version,
+		GitCommit:      dockerversion.GITCOMMIT,
+		GoVersion:      runtime.Version(),
+		Os:             runtime.GOOS,
+		Arch:           runtime.GOARCH,
+		BuildTime:      dockerversion.BUILDTIME,
+		PackageVersion: pkgVersion,
 	}
 
 	version := httputils.VersionFromContext(ctx)

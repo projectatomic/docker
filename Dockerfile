@@ -44,6 +44,7 @@ RUN apt-get update && apt-get install -y \
 	git \
 	iptables \
 	libapparmor-dev \
+	libaudit-dev \
 	libcap-dev \
 	libsqlite3-dev \
 	libsystemd-journal-dev \

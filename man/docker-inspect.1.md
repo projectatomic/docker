@@ -8,6 +8,8 @@ docker-inspect - Return low-level information on a container or image
 **docker inspect**
 [**--help**]
 [**-f**|**--format**[=*FORMAT*]]
+[**-r**|**--remote**[=*false*]]
+[**-s**|**--size**[=*false*]]
 [**--type**=*container*|*image*]
 CONTAINER|IMAGE [CONTAINER|IMAGE...]
 
@@ -24,6 +26,17 @@ each result.
 
 **-f**, **--format**=""
     Format the output using the given Go template.
+
+**-r**, **--remote**=*true*|*false*
+    Inspect remote images.
+
+    Image name can be suffixed with [:TAG]. If short name is given, all
+additional registries will be searched until a match is found. The default is
+*false*. To see image's digest string and its source registry, pass **-D**
+option to Docker client. Implies **--type=image**.
+
+**-s**, **--size**=false
+    Display total file sizes if the type is container.
 
 **--type**=*container*|*image*
     Return JSON for specified type, permissible values are "image" or "container"
@@ -204,6 +217,18 @@ output:
 
 You can get more information about how to write a Go template from:
 https://golang.org/pkg/text/template/.
+
+## Getting size information on an container
+
+    $ docker inspect -s d2cc496561d6
+    [
+    {
+    ....
+    "SizeRw": 0,
+    "SizeRootFs": 972,
+    ....
+    }
+    ]
 
 ## Getting information on an image
 

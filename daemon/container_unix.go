@@ -30,6 +30,7 @@ import (
 	"github.com/docker/docker/volume"
 	"github.com/docker/docker/volume/store"
 	"github.com/docker/libnetwork"
+	"github.com/docker/libnetwork/drivers/bridge"
 	"github.com/docker/libnetwork/netlabel"
 	"github.com/docker/libnetwork/options"
 	"github.com/docker/libnetwork/types"
@@ -651,11 +652,13 @@ func (container *Container) buildEndpointInfo(ep libnetwork.Endpoint, networkSet
 		return networkSettings, nil
 	}
 
-	ones, _ := iface.Address().Mask.Size()
-	networkSettings.IPAddress = iface.Address().IP.String()
-	networkSettings.IPPrefixLen = ones
+	if iface.Address() != nil {
+		ones, _ := iface.Address().Mask.Size()
+		networkSettings.IPAddress = iface.Address().IP.String()
+		networkSettings.IPPrefixLen = ones
+	}
 
-	if iface.AddressIPv6().IP.To16() != nil {
+	if iface.AddressIPv6() != nil && iface.AddressIPv6().IP.To16() != nil {
 		onesv6, _ := iface.AddressIPv6().Mask.Size()
 		networkSettings.GlobalIPv6Address = iface.AddressIPv6().IP.String()
 		networkSettings.GlobalIPv6PrefixLen = onesv6
@@ -861,9 +864,8 @@ func createNetwork(controller libnetwork.NetworkController, dnet string, driver 
 
 	// Bridge driver is special due to legacy reasons
 	if runconfig.NetworkMode(driver).IsBridge() {
-		genericOption[netlabel.GenericData] = map[string]interface{}{
-			"BridgeName":            dnet,
-			"AllowNonDefaultBridge": "true",
+		genericOption[netlabel.GenericData] = map[string]string{
+			bridge.BridgeName: dnet,
 		}
 		networkOption := libnetwork.NetworkOptionGeneric(genericOption)
 		createOptions = append(createOptions, networkOption)
@@ -1163,7 +1165,7 @@ func (container *Container) disconnectFromNetwork(n libnetwork.Network, updateSe
 	n.WalkEndpoints(s)
 
 	if ep == nil {
-		return fmt.Errorf("could not locate network endpoint for container %s", container.ID)
+		return fmt.Errorf("container %s is not connected to the network", container.ID)
 	}
 
 	if err := ep.Leave(sbox); err != nil {
@@ -1351,6 +1353,48 @@ func (container *Container) removeMountPoints(rm bool) error {
 	if len(rmErrors) > 0 {
 		return derr.ErrorCodeRemovingVolume.WithArgs(strings.Join(rmErrors, "\n"))
 	}
+	return nil
+}
+
+func (container *Container) cleanupSecrets() {
+	// Now the container is running, unmount the secrets on the host
+	secretsPath, err := container.secretsPath()
+	if err != nil {
+		logrus.Errorf("%v: Secrets Path does not exist: %v", container.ID, err)
+		return
+	}
+
+	if err := syscall.Unmount(secretsPath, syscall.MNT_DETACH); err != nil {
+		logrus.Errorf("%v: Failed to umount %s filesystem: %v", container.ID, secretsPath, err)
+		return
+	}
+}
+
+func (container *Container) secretsPath() (string, error) {
+	return container.getRootResourcePath("secrets")
+}
+func (container *Container) setupSecretFiles() error {
+	secretsPath, err := container.secretsPath()
+	if err != nil {
+		return err
+	}
+
+	if err := os.MkdirAll(secretsPath, 0700); err != nil {
+		return err
+	}
+
+	if err := syscall.Mount("tmpfs", secretsPath, "tmpfs", uintptr(syscall.MS_NOEXEC|syscall.MS_NOSUID|syscall.MS_NODEV), label.FormatMountLabel("", container.getMountLabel())); err != nil {
+		return fmt.Errorf("mounting secret tmpfs: %s", err)
+	}
+
+	data, err := getHostSecretData()
+	if err != nil {
+		return err
+	}
+	for _, s := range data {
+		s.SaveTo(secretsPath)
+	}
+
 	return nil
 }
 
