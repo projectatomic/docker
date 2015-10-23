@@ -167,37 +167,6 @@ func (s *DockerSuite) TestInspectApiEmptyFieldsInConfigPre121(c *check.C) {
 	}
 }
 
-// #17131, #17139, #17173
-func (s *DockerSuite) TestInspectApiEmptyFieldsInConfigPre121(c *check.C) {
-	out, _ := dockerCmd(c, "run", "-d", "busybox", "true")
-
-	cleanedContainerID := strings.TrimSpace(out)
-
-	cases := []string{"1.19", "1.20"}
-	for _, version := range cases {
-		endpoint := fmt.Sprintf("/v%s/containers/%s/json", version, cleanedContainerID)
-		status, body, err := sockRequest("GET", endpoint, nil)
-		c.Assert(err, check.IsNil)
-		c.Assert(status, check.Equals, http.StatusOK)
-
-		var inspectJSON map[string]interface{}
-		if err = json.Unmarshal(body, &inspectJSON); err != nil {
-			c.Fatalf("unable to unmarshal body for version %s: %v", version, err)
-		}
-
-		config, ok := inspectJSON["Config"]
-		if !ok {
-			c.Fatal("Unable to find 'Config'")
-		}
-		cfg := config.(map[string]interface{})
-		for _, f := range []string{"MacAddress", "NetworkDisabled", "ExposedPorts"} {
-			if _, ok := cfg[f]; !ok {
-				c.Fatalf("Api version %s expected to include %s in 'Config'", version, f)
-			}
-		}
-	}
-}
-
 func compareInspectValues(c *check.C, name string, fst, snd interface{}, localVsRemote bool) {
 	additionalLocalAttributes := map[string]struct{}{}
 	additionalRemoteAttributes := map[string]struct{}{}
