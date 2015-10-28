@@ -215,6 +215,10 @@ func (s *Server) LogAction(w http.ResponseWriter, r *http.Request) error {
 		}
 		message = fmt.Sprintf("LoginUID=%v, %s", uid, message)
 		loginuid = int(uid)
+		if loginuid == -1 {
+			//No login UID is set, so no point in looking up a name
+			break
+		}
 
 		//Get username
 		username, err = getpwuid(uid)
