@@ -101,8 +101,7 @@ RUN cd /usr/local/go/src && ./make.bash --no-clean 2>&1
 ENV DOCKER_CROSSPLATFORMS \
 	linux/386 linux/arm \
 	darwin/amd64 darwin/386 \
-	freebsd/amd64 freebsd/386 freebsd/arm \
-	windows/amd64 windows/386
+	freebsd/amd64 freebsd/386 freebsd/arm
 
 # (set an explicit GOARM of 5 for maximum compatibility)
 ENV GOARM 5
