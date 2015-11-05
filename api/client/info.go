@@ -6,6 +6,7 @@ import (
 
 	"github.com/docker/docker/api/types"
 	Cli "github.com/docker/docker/cli"
+	"github.com/docker/docker/daemon/execdriver/dockerhooks"
 	"github.com/docker/docker/pkg/httputils"
 	"github.com/docker/docker/pkg/ioutils"
 	flag "github.com/docker/docker/pkg/mflag"
@@ -46,6 +47,7 @@ func (cli *DockerCli) CmdInfo(args ...string) error {
 	ioutils.FprintfIfNotEmpty(cli.out, "Logging Driver: %s\n", info.LoggingDriver)
 	ioutils.FprintfIfNotEmpty(cli.out, "Kernel Version: %s\n", info.KernelVersion)
 	ioutils.FprintfIfNotEmpty(cli.out, "Operating System: %s\n", info.OperatingSystem)
+	fmt.Fprintf(cli.out, "Number of Docker Hooks: %d\n", dockerhooks.TotalHooks())
 	fmt.Fprintf(cli.out, "CPUs: %d\n", info.NCPU)
 	fmt.Fprintf(cli.out, "Total Memory: %s\n", units.BytesSize(float64(info.MemTotal)))
 	ioutils.FprintfIfNotEmpty(cli.out, "Name: %s\n", info.Name)

@@ -32,6 +32,7 @@ For example:
     Logging Driver: json-file
     Kernel Version: 3.19.0-22-generic
     Operating System: Ubuntu 15.04
+    Number of Hooks: 2
     CPUs: 24
     Total Memory: 62.86 GiB
     Name: docker
