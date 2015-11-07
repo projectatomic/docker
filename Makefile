@@ -39,6 +39,7 @@ ifeq ($(INTERACTIVE), 1)
 endif
 
 DOCKER_RUN_DOCKER := $(DOCKER_FLAGS) "$(DOCKER_IMAGE)"
+DOCKER_FILE := $(shell go run ./distribution/gen_dockerfile.go)
 
 default: binary
 
@@ -79,7 +80,7 @@ shell: build
 	$(DOCKER_RUN_DOCKER) bash
 
 build: bundles
-	docker build -t "$(DOCKER_IMAGE)" .
+	docker build -t "$(DOCKER_IMAGE)" -f $(DOCKER_FILE) .
 
 bundles:
 	mkdir bundles
