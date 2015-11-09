@@ -132,6 +132,17 @@ criteria.  In order to do this administrator activity must be audited.
 
 https://github.com/rhatdan/docker/pull/109
 
+#### Add-volume-support-to-docker-build.patch
+
+This patch adds the ability to add bind mounts at build-time.
+This will be helpful in supporting builds with host files and secrets.
+The `--volume|-v` flag is added for this purpose. Trying to define a
+volume (ala `docker run`) errors out. Each bind mounts' mode will be
+read-only and it will preserve any SELinux label which was defined via
+the cli (`:[z,Z]`). Defining a read-write mode (`:rw`) will just print
+a warning in the build output and the actual mode will be changed to
+read-only.
+
 Docker: the container engine [![Release](https://img.shields.io/github/release/docker/docker.svg)](https://github.com/docker/docker/releases/latest)
 ============================
 

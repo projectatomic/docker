@@ -442,6 +442,15 @@ func (s *router) postBuild(ctx context.Context, w http.ResponseWriter, r *http.R
 		buildConfig.BuildArgs = buildArgs
 	}
 
+	var buildBinds = []string{}
+	buildBindsJSON := r.FormValue("buildbinds")
+	if buildBindsJSON != "" {
+		if err := json.NewDecoder(strings.NewReader(buildBindsJSON)).Decode(&buildBinds); err != nil {
+			return errf(err)
+		}
+		buildConfig.Binds = buildBinds
+	}
+
 	remoteURL := r.FormValue("remote")
 
 	// Currently, only used if context is from a remote url.

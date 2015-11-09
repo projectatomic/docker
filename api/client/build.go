@@ -36,6 +36,7 @@ import (
 	"github.com/docker/docker/registry"
 	"github.com/docker/docker/runconfig"
 	"github.com/docker/docker/utils"
+	"github.com/docker/docker/volume"
 )
 
 const (
@@ -66,7 +67,8 @@ func (cli *DockerCli) CmdBuild(args ...string) error {
 	flCgroupParent := cmd.String([]string{"-cgroup-parent"}, "", "Optional parent cgroup for the container")
 	flBuildArg := opts.NewListOpts(opts.ValidateEnv)
 	cmd.Var(&flBuildArg, []string{"-build-arg"}, "Set build-time variables")
-
+	flBuildVolumes := opts.NewListOpts(nil)
+	cmd.Var(&flBuildVolumes, []string{"v", "-volume"}, "Set build-time bind mounts")
 	ulimits := make(map[string]*ulimit.Ulimit)
 	flUlimits := opts.NewUlimitOpt(&ulimits)
 	cmd.Var(flUlimits, []string{"-ulimit"}, "Ulimit options")
@@ -273,6 +275,27 @@ func (cli *DockerCli) CmdBuild(args ...string) error {
 		return err
 	}
 	v.Set("buildargs", string(buildArgsJSON))
+
+	var binds []string
+	// add any bind targets to the list of container volumes
+	for bind := range flBuildVolumes.GetMap() {
+		if arr := volume.SplitN(bind, 2); len(arr) > 1 {
+			// after creating the bind mount we want to delete it from the flBuildVolumes values because
+			// we do not want bind mounts being committed to image configs
+			binds = append(binds, bind)
+			flBuildVolumes.Delete(bind)
+		}
+	}
+
+	if len(flBuildVolumes.GetMap()) > 0 {
+		return fmt.Errorf("Volumes aren't supported in docker build. Please use only bind mounts.")
+	}
+
+	buildBindsJSON, err := json.Marshal(binds)
+	if err != nil {
+		return err
+	}
+	v.Set("buildbinds", string(buildBindsJSON))
 
 	headers := http.Header(make(map[string][]string))
 	buf, err := json.Marshal(cli.configFile.AuthConfigs)
