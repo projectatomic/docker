@@ -50,8 +50,6 @@ RUN apt-get update && apt-get install -y \
 	mercurial \
 	parallel \
 	pkg-config \
-	python-mock \
-	python-pip \
 	python-websocket \
 	s3cmd=1.1.0* \
 	ubuntu-zfs \
