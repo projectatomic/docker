@@ -690,6 +690,18 @@ func (graph *Graph) generateV1CompatibilityChain(id string) ([]byte, error) {
 	return json, nil
 }
 
+// RawJSON returns the JSON representation for an image as a byte array.
+func (graph *Graph) RawJSON(id string) ([]byte, error) {
+	root := graph.imageRoot(id)
+
+	buf, err := ioutil.ReadFile(jsonPath(root))
+	if err != nil {
+		return nil, fmt.Errorf("Failed to read json for image %s: %s", id, err)
+	}
+
+	return buf, nil
+}
+
 func jsonPath(root string) string {
 	return filepath.Join(root, jsonFileName)
 }
