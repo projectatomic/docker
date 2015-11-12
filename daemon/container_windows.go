@@ -203,3 +203,10 @@ func (daemon *Daemon) mountVolumes(container *Container) error {
 func (container *Container) unmountVolumes(forceSyscall bool) error {
 	return nil
 }
+
+func (container *Container) cleanupSecrets() {
+	return
+}
+func (container *Container) setupSecretFiles() error {
+	return nil
+}
