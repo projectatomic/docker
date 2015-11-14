@@ -65,7 +65,7 @@ func (daemon *Daemon) Commit(name string, c *ContainerCommitConfig) (*image.Imag
 
 	// Register the image if needed
 	if c.Repo != "" {
-		if err := daemon.repositories.Tag(c.Repo, c.Tag, img.ID, true); err != nil {
+		if err := daemon.repositories.Tag(c.Repo, c.Tag, img.ID, true, true); err != nil {
 			return img, err
 		}
 	}
