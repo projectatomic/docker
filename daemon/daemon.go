@@ -1026,8 +1026,8 @@ func (daemon *Daemon) Graph() *graph.Graph {
 // TagImage creates a tag in the repository reponame, pointing to the image named
 // imageName. If force is true, an existing tag with the same name may be
 // overwritten.
-func (daemon *Daemon) TagImage(repoName, tag, imageName string, force bool) error {
-	if err := daemon.repositories.Tag(repoName, tag, imageName, force); err != nil {
+func (daemon *Daemon) TagImage(repoName, tag, imageName string, force, keepUnqualified bool) error {
+	if err := daemon.repositories.Tag(repoName, tag, imageName, force, keepUnqualified); err != nil {
 		return err
 	}
 	daemon.EventsService.Log("tag", utils.ImageReference(repoName, tag), "")
