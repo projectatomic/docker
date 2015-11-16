@@ -75,12 +75,12 @@ func getUcred(fd int) (*syscall.Ucred, error) {
 func getLoginUID(ucred *syscall.Ucred, fd int) (int, error) {
 	if _, err := syscall.Getpeername(fd); err != nil {
 		logrus.Errorf("Socket appears to have closed: %v", err)
-		return 0xffffffff, err
+		return -1, err
 	}
 	loginuid, err := ioutil.ReadFile(fmt.Sprintf("/proc/%d/loginuid", ucred.Pid))
 	if err != nil {
 		logrus.Errorf("Error reading loginuid: %v", err)
-		return 0xffffffff, err
+		return -1, err
 	}
 	loginuidInt, err := strconv.Atoi(string(loginuid))
 	if err != nil {
