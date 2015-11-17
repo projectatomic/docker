@@ -1,4 +1,4 @@
-.PHONY: all binary build cross default docs docs-build docs-shell shell test test-unit test-integration-cli test-docker-py validate
+.PHONY: all binary build cross default docs docs-build docs-shell dynbinary shell test test-unit test-integration-cli test-docker-py validate
 
 # get OS/Arch of docker engine
 DOCKER_ENGINE_OSARCH = $(shell docker version | grep 'OS/Arch' | tail -1 | cut -d':' -f2 | tr -d '[[:space:]]')
