@@ -23,6 +23,7 @@
 # the case. Therefore, you don't have to disable it anymore.
 #
 
+# Cut for distribution specific
 FROM ubuntu:14.04
 MAINTAINER Tianon Gravi <admwiggin@gmail.com> (@tianon)
 
@@ -38,24 +39,18 @@ RUN	echo deb http://llvm.org/apt/trusty/ llvm-toolchain-trusty main > /etc/apt/s
 RUN apt-get update && apt-get install -y \
 	apparmor \
 	aufs-tools \
-	automake \
 	bash-completion \
 	btrfs-tools \
 	build-essential \
 	clang-3.8 \
 	createrepo \
-	curl \
 	dpkg-sig \
 	gcc-mingw-w64 \
-	git \
-	iptables \
 	libapparmor-dev \
 	libcap-dev \
 	libltdl-dev \
 	libsqlite3-dev \
 	libsystemd-journal-dev \
-	mercurial \
-	parallel \
 	pkg-config \
 	python-websocket \
 	s3cmd=1.1.0* \
@@ -63,6 +58,15 @@ RUN apt-get update && apt-get install -y \
 	xfsprogs \
 	libzfs-dev \
 	--no-install-recommends \
+# End dependencies cut
+	automake \
+	curl \
+	git \
+	iptables \
+	mercurial \
+	parallel \
+	python-mock \
+	python-pip \
 	&& ln -snf /usr/bin/clang-3.8 /usr/local/bin/clang \
 	&& ln -snf /usr/bin/clang++-3.8 /usr/local/bin/clang++
 
@@ -163,7 +167,9 @@ RUN useradd --create-home --gid docker unprivilegeduser
 
 VOLUME /var/lib/docker
 WORKDIR /go/src/github.com/docker/docker
+#  Cut for buildtags distribution specific
 ENV DOCKER_BUILDTAGS apparmor selinux
+# End buildtags cut
 
 # Let us use a .bashrc file
 RUN ln -sfv $PWD/.bashrc ~/.bashrc
