@@ -8,16 +8,14 @@ import (
 	"strings"
 	"syscall"
 
+	"github.com/Sirupsen/logrus"
 	"github.com/docker/docker/daemon/execdriver"
 	"github.com/docker/docker/daemon/execdriver/dockerhooks"
 	derr "github.com/docker/docker/errors"
 	"github.com/docker/docker/pkg/mount"
-
 	"github.com/opencontainers/runc/libcontainer/apparmor"
 	"github.com/opencontainers/runc/libcontainer/configs"
 	"github.com/opencontainers/runc/libcontainer/devices"
-
-	"github.com/Sirupsen/logrus"
 )
 
 // createContainer populates and configures the container type with the
