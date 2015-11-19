@@ -6678,7 +6678,6 @@ func (s *DockerRegistrySuite) doTestBuildWithPublicRegistryBlocked(c *check.C, n
   `, name), true)
 	if err == nil {
 		c.Fatal("build should have failed because of public registry being blocked")
-		re
 	}
 
 	// now base the image on local busybox image
