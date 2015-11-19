@@ -242,10 +242,6 @@ func (daemon *Daemon) Register(container *Container) error {
 		}
 	}
 
-	if err := daemon.verifyVolumesInfo(container); err != nil {
-		return err
-	}
-
 	if err := daemon.prepareMountPoints(container); err != nil {
 		return err
 	}
@@ -1346,6 +1342,12 @@ func (daemon *Daemon) getNetworkStats(c *Container) ([]*libcontainer.NetworkInte
 	}
 
 	return list, nil
+}
+
+// newBaseContainer creates a new container with its initial
+// configuration based on the root storage from the daemon.
+func (daemon *Daemon) newBaseContainer(id string) *Container {
+	return newBaseContainer(id, daemon.containerRoot(id))
 }
 
 func convertLnNetworkStats(name string, stats *lntypes.InterfaceStatistics) *libcontainer.NetworkInterface {
