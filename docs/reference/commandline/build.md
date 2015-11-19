@@ -33,6 +33,7 @@ parent = "smn_cli"
       --rm=true                       Remove intermediate containers after a successful build
       -t, --tag=[]                    Name and optionally a tag in the 'name:tag' format
       --ulimit=[]                     Ulimit options
+      --v, --volume=[]                Set build-time bind mounts
 
 Builds Docker images from a Dockerfile and a "context". A build's context is
 the files located in the specified `PATH` or `URL`. The build process can refer
