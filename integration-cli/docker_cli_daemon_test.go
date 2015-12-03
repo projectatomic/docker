@@ -1878,3 +1878,62 @@ func (s *DockerDaemonSuite) TestDaemonNoSpaceleftOnDeviceError(c *check.C) {
 	out, err := s.d.Cmd("pull", "registry:2")
 	c.Assert(out, check.Not(check.Equals), 1, check.Commentf("no space left on device"))
 }
+
+func (s *DockerDaemonSuite) TestDaemonStartWithNoImageVolume(c *check.C) {
+	c.Assert(s.d.StartWithBusybox("--no-image-volume"), checker.IsNil)
+
+	imgName := "novolume"
+	dockerfile := `
+		FROM busybox
+		VOLUME novolume
+		`
+	_, out, err := buildImageWithOut(imgName, dockerfile, false)
+	c.Assert(err, checker.IsNil)
+	expected := "[Warning] You won't be able to run the resulting image because VOLUME was defined and the daemon is set not to allow VOLUME(s)"
+	c.Assert(out, checker.Contains, expected)
+
+	out, err = s.d.Cmd("run", imgName)
+	c.Assert(err, checker.NotNil)
+	c.Assert(out, checker.Contains, "image volumes are not allowed")
+}
+
+func (s *DockerDaemonSuite) TestDaemonStartWithNoImageVolumeBinds(c *check.C) {
+	c.Assert(s.d.StartWithBusybox("--no-image-volume"), checker.IsNil)
+
+	imgName := "novolume"
+	dockerfile := `
+		FROM busybox
+		`
+	_, out, err := buildImageWithOut(imgName, dockerfile, false)
+	c.Assert(err, checker.IsNil)
+	expected := "[Warning] You won't be able to run the resulting image because VOLUME was defined and the daemon is set not to allow VOLUME(s)"
+	c.Assert(out, checker.Not(checker.Contains), expected)
+
+	tmpDir, err := ioutil.TempDir("", "test")
+	c.Assert(err, check.IsNil)
+	f := filepath.Join(tmpDir, "file")
+	c.Assert(ioutil.WriteFile(f, []byte("foobar"), 0644), check.IsNil)
+
+	out, err = s.d.Cmd("run", "-v", tmpDir+":/test/", imgName, "cat", "/test/file")
+	c.Assert(err, checker.IsNil)
+	c.Assert(out, checker.Not(checker.Contains), "image volumes are not allowed")
+	c.Assert(out, checker.Contains, "foobar")
+}
+
+func (s *DockerDaemonSuite) TestDaemonStartWithNoImageVolumeFalse(c *check.C) {
+	c.Assert(s.d.StartWithBusybox("--no-image-volume=false"), checker.IsNil)
+
+	imgName := "volume"
+	dockerfile := `
+		FROM busybox
+		VOLUME volume
+		`
+	_, out, err := buildImageWithOut(imgName, dockerfile, false)
+	c.Assert(err, checker.IsNil)
+	expected := "[Warning] You won't be able to run the resulting image because VOLUME was defined and the daemon is set not to allow VOLUME(s)"
+	c.Assert(out, checker.Not(checker.Contains), expected)
+
+	out, err = s.d.Cmd("run", imgName)
+	c.Assert(err, checker.IsNil)
+	c.Assert(out, checker.Not(checker.Contains), "image volumes are not allowed")
+}
