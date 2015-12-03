@@ -472,6 +472,9 @@ func (b *Builder) probeCache() (bool, error) {
 	if !ok || !b.UseCache || b.cacheBusted {
 		return false, nil
 	}
+	if len(b.Binds) > 0 {
+		return false, nil
+	}
 	cache, err := c.GetCachedImage(b.image, b.runConfig)
 	if err != nil {
 		return false, err
