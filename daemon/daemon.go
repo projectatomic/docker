@@ -1333,6 +1333,12 @@ func (daemon *Daemon) config() *Config {
 	return daemon.configStore
 }
 
+// AllowImageVolumes returns true if the daemon was started with --no-volume=false
+// or --no-volume wasn't present at all
+func (daemon *Daemon) AllowImageVolumes() bool {
+	return !daemon.configStore.NoImageVolume
+}
+
 // GraphDriver returns the currently used driver for processing
 // container layers.
 func (daemon *Daemon) GraphDriver() graphdriver.Driver {

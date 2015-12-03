@@ -147,6 +147,8 @@ type Docker interface {
 	Unmount(c *daemon.Container) error
 	// Start starts a new container
 	Start(c *daemon.Container) error
+	// AllowImageVolumes tells whether the daemon allows running images with VOLUMES(s) or not
+	AllowImageVolumes() bool
 }
 
 // ImageCache abstracts an image cache store.

@@ -73,6 +73,14 @@ func (daemon *Daemon) containerStart(container *Container) (err error) {
 	container.Lock()
 	defer container.Unlock()
 
+	img, err := daemon.imageStore.Get(container.ImageID)
+	if err != nil {
+		return err
+	}
+	if len(img.Config.Volumes) > 0 && daemon.configStore.NoImageVolume {
+		return derr.ErrorCodeCantStart.WithArgs(container.ID, "image volumes are not allowed")
+	}
+
 	if container.Running {
 		return nil
 	}
