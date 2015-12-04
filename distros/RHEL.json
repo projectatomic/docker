@@ -40,6 +40,6 @@
       "Cut for distribution specific",
       "End dependencies cut",
       "Sqlite3 install manually",
-      "Cut for buildtags distribution",
+      "Cut for buildtags distribution specific",
       "End buildtags cut" ]
 }

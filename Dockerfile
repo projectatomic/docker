@@ -158,7 +158,10 @@ RUN useradd --create-home --gid docker unprivilegeduser
 
 VOLUME /var/lib/docker
 WORKDIR /go/src/github.com/docker/docker
-#  Cut for buildtags distribution specific
+
+# Sqlite3 install manually
+
+# Cut for buildtags distribution specific
 ENV DOCKER_BUILDTAGS apparmor selinux
 # End buildtags cut
 
