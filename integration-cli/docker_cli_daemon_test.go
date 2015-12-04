@@ -1882,12 +1882,11 @@ func (s *DockerDaemonSuite) TestDaemonNoSpaceleftOnDeviceError(c *check.C) {
 func (s *DockerDaemonSuite) TestDaemonStartWithNoImageVolume(c *check.C) {
 	c.Assert(s.d.StartWithBusybox("--no-image-volume"), checker.IsNil)
 
+	dockerfile, cleanup, err := makefile("FROM busybox\nVOLUME novolume")
+	c.Assert(err, check.IsNil, check.Commentf("Unable to create test dockerfile"))
+	defer cleanup()
 	imgName := "novolume"
-	dockerfile := `
-		FROM busybox
-		VOLUME novolume
-		`
-	_, out, err := buildImageWithOut(imgName, dockerfile, false)
+	out, err := s.d.Cmd("build", "-t", imgName, "--file", dockerfile, ".")
 	c.Assert(err, checker.IsNil)
 	expected := "[Warning] You won't be able to run the resulting image because VOLUME was defined and the daemon is set not to allow VOLUME(s)"
 	c.Assert(out, checker.Contains, expected)
@@ -1895,16 +1894,25 @@ func (s *DockerDaemonSuite) TestDaemonStartWithNoImageVolume(c *check.C) {
 	out, err = s.d.Cmd("run", imgName)
 	c.Assert(err, checker.NotNil)
 	c.Assert(out, checker.Contains, "image volumes are not allowed")
+
+	// ensure docker commit shows a warning if there's a VOLUME in changes
+	testCommitName := "commit-with-volume"
+	_, err = s.d.Cmd("run", "--name", testCommitName, "busybox", "true")
+	c.Assert(err, check.IsNil)
+	out, err = s.d.Cmd("commit", "--change", "VOLUME test", testCommitName, testCommitName+"-commit")
+	c.Assert(err, check.IsNil)
+	expected = "WARNING: You won't be able to run the resulting image because VOLUME was defined and the daemon is set not to allow VOLUME(s)"
+	c.Assert(out, checker.Contains, expected)
 }
 
 func (s *DockerDaemonSuite) TestDaemonStartWithNoImageVolumeBinds(c *check.C) {
 	c.Assert(s.d.StartWithBusybox("--no-image-volume"), checker.IsNil)
 
+	dockerfile, cleanup, err := makefile("FROM busybox")
+	c.Assert(err, check.IsNil, check.Commentf("Unable to create test dockerfile"))
+	defer cleanup()
 	imgName := "novolume"
-	dockerfile := `
-		FROM busybox
-		`
-	_, out, err := buildImageWithOut(imgName, dockerfile, false)
+	out, err := s.d.Cmd("build", "-t", imgName, "--file", dockerfile, ".")
 	c.Assert(err, checker.IsNil)
 	expected := "[Warning] You won't be able to run the resulting image because VOLUME was defined and the daemon is set not to allow VOLUME(s)"
 	c.Assert(out, checker.Not(checker.Contains), expected)
@@ -1915,7 +1923,7 @@ func (s *DockerDaemonSuite) TestDaemonStartWithNoImageVolumeBinds(c *check.C) {
 	c.Assert(ioutil.WriteFile(f, []byte("foobar"), 0644), check.IsNil)
 
 	out, err = s.d.Cmd("run", "-v", tmpDir+":/test/", imgName, "cat", "/test/file")
-	c.Assert(err, checker.IsNil)
+	c.Assert(err, checker.IsNil, check.Commentf(out))
 	c.Assert(out, checker.Not(checker.Contains), "image volumes are not allowed")
 	c.Assert(out, checker.Contains, "foobar")
 }
@@ -1923,17 +1931,16 @@ func (s *DockerDaemonSuite) TestDaemonStartWithNoImageVolumeBinds(c *check.C) {
 func (s *DockerDaemonSuite) TestDaemonStartWithNoImageVolumeFalse(c *check.C) {
 	c.Assert(s.d.StartWithBusybox("--no-image-volume=false"), checker.IsNil)
 
+	dockerfile, cleanup, err := makefile("FROM busybox\nVOLUME test")
+	c.Assert(err, check.IsNil, check.Commentf("Unable to create test dockerfile"))
+	defer cleanup()
 	imgName := "volume"
-	dockerfile := `
-		FROM busybox
-		VOLUME volume
-		`
-	_, out, err := buildImageWithOut(imgName, dockerfile, false)
+	out, err := s.d.Cmd("build", "-t", imgName, "--file", dockerfile, ".")
 	c.Assert(err, checker.IsNil)
 	expected := "[Warning] You won't be able to run the resulting image because VOLUME was defined and the daemon is set not to allow VOLUME(s)"
 	c.Assert(out, checker.Not(checker.Contains), expected)
 
 	out, err = s.d.Cmd("run", imgName)
-	c.Assert(err, checker.IsNil)
+	c.Assert(err, checker.IsNil, check.Commentf(out))
 	c.Assert(out, checker.Not(checker.Contains), "image volumes are not allowed")
 }

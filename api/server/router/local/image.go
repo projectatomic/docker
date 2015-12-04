@@ -54,13 +54,22 @@ func (s *router) postCommit(ctx context.Context, w http.ResponseWriter, r *http.
 		return err
 	}
 
+	warnings := []string{}
+	changes := r.Form["changes"]
+	for _, v := range changes {
+		if strings.Contains(v, "VOLUME") {
+			warnings = append(warnings, "You won't be able to run the resulting image because VOLUME was defined and the daemon is set not to allow VOLUME(s)")
+			break
+		}
+	}
+
 	commitCfg := &dockerfile.CommitConfig{
 		Pause:   pause,
 		Repo:    r.Form.Get("repo"),
 		Tag:     r.Form.Get("tag"),
 		Author:  r.Form.Get("author"),
 		Comment: r.Form.Get("comment"),
-		Changes: r.Form["changes"],
+		Changes: changes,
 		Config:  c,
 	}
 
@@ -74,7 +83,8 @@ func (s *router) postCommit(ctx context.Context, w http.ResponseWriter, r *http.
 	}
 
 	return httputils.WriteJSON(w, http.StatusCreated, &types.ContainerCommitResponse{
-		ID: string(imgID),
+		ID:       string(imgID),
+		Warnings: warnings,
 	})
 }
 
