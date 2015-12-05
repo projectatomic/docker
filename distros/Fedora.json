@@ -1,7 +1,8 @@
 {
     "distribution": "FROM fedora",
     "dependencies":[
-      "  RUN dnf -y update && dnf install -y \\",
+      "RUN dnf -y update && dnf install -y \\",
+      "  audit-libs-devel \\",
       "  binutils \\",
       "  btrfs-progs-devel \\",
       "  btrfs-progs \\",
@@ -29,9 +30,9 @@
       "  ruby-devel \\",
       "  tar \\" ],
     "sqlite": [
-      "  RUN mkdir -p /usr/src/sqlite3 \\",
+      "RUN mkdir -p /usr/src/sqlite3 \\",
       "    && curl -sSL https://www.sqlite.org/2015/sqlite-autoconf-3081002.tar.gz  | tar -v -C /usr/src/sqlite3 -xz",
-      "  RUN cd /usr/src/sqlite3/sqlite-autoconf-3081002 \\",
+      "RUN cd /usr/src/sqlite3/sqlite-autoconf-3081002 \\",
       "    && ./configure --enable-static \\",
       "    && make \\",
       "    && make install \\",
@@ -41,6 +42,6 @@
       "Cut for distribution specific",
       "End dependencies cut",
       "Sqlite3 install manually",
-      "Cut for buildtags distribution",
+      "Cut for buildtags distribution specific",
       "End buildtags cut" ]
 }
