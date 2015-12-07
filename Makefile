@@ -58,6 +58,7 @@ ifeq ($(INTERACTIVE), 1)
 endif
 
 DOCKER_RUN_DOCKER := $(DOCKER_FLAGS) "$(DOCKER_IMAGE)"
+DOCKER_FILE := $(shell go run ./distros/gen_dockerfile.go)
 
 default: binary
 
