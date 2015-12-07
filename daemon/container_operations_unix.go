@@ -850,6 +850,48 @@ func (daemon *Daemon) releaseNetwork(container *container.Container) {
 	}
 }
 
+func (daemon *Daemon) secretsPath(container *container.Container) (string, error) {
+	return container.GetRootResourcePath("secrets")
+}
+func (daemon *Daemon) setupSecretFiles(container *container.Container) error {
+	secretsPath, err := daemon.secretsPath(container)
+	if err != nil {
+		return err
+	}
+
+	if err := os.MkdirAll(secretsPath, 0700); err != nil {
+		return err
+	}
+
+	if err := syscall.Mount("tmpfs", secretsPath, "tmpfs", uintptr(syscall.MS_NOEXEC|syscall.MS_NOSUID|syscall.MS_NODEV), label.FormatMountLabel("", container.GetMountLabel())); err != nil {
+		return fmt.Errorf("mounting secret tmpfs: %s", err)
+	}
+
+	data, err := getHostSecretData()
+	if err != nil {
+		return err
+	}
+	for _, s := range data {
+		s.SaveTo(secretsPath)
+	}
+
+	return nil
+}
+
+func (daemon *Daemon) cleanupSecrets(container *container.Container) {
+	// Now the container is running, unmount the secrets on the host
+	secretsPath, err := daemon.secretsPath(container)
+	if err != nil {
+		logrus.Errorf("%v: Secrets Path does not exist: %v", container.ID, err)
+		return
+	}
+
+	if err := syscall.Unmount(secretsPath, 0); err != nil {
+		logrus.Errorf("%v: Failed to umount %s filesystem: %v", container.ID, secretsPath, err)
+		return
+	}
+}
+
 func (daemon *Daemon) setupIpcDirs(c *container.Container) error {
 	rootUID, rootGID := daemon.GetRemappedUIDGID()
 	if !c.HasMountFor("/dev/shm") {

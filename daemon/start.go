@@ -112,6 +112,12 @@ func (daemon *Daemon) containerStart(container *container.Container) (err error)
 		return err
 	}
 
+	defer daemon.cleanupSecrets(container)
+
+	if err := daemon.setupSecretFiles(container); err != nil {
+		return err
+	}
+
 	if !container.HostConfig.IpcMode.IsContainer() && !container.HostConfig.IpcMode.IsHost() {
 		if err := daemon.setupIpcDirs(container); err != nil {
 			return err
