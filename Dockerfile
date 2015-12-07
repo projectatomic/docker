@@ -69,9 +69,10 @@ RUN apt-get update && apt-get install -y \
 	mercurial \
 	parallel \
 	python-mock \
-	python-pip \
-	ln -snf /usr/bin/clang-3.8 /usr/local/bin/clang \
-	ln -snf /usr/bin/clang++-3.8 /usr/local/bin/clang++
+	python-pip
+
+RUN ln -snf /usr/bin/clang-3.8 /usr/local/bin/clang
+RUN ln -snf /usr/bin/clang++-3.8 /usr/local/bin/clang++
 
 # Get lvm2 source for compiling statically
 RUN git clone -b v2_02_103 https://git.fedorahosted.org/git/lvm2.git /usr/local/lvm2
