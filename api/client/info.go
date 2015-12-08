@@ -3,6 +3,7 @@ package client
 import (
 	"encoding/json"
 	"fmt"
+	"strings"
 
 	"github.com/docker/docker/api/types"
 	Cli "github.com/docker/docker/cli"
@@ -142,5 +143,17 @@ func (cli *DockerCli) CmdInfo(args ...string) error {
 	if info.ClusterAdvertise != "" {
 		fmt.Fprintf(cli.out, "Cluster advertise: %s\n", info.ClusterAdvertise)
 	}
+
+	fmt.Fprintf(cli.out, "Registries: ")
+	regs := []string{}
+	for _, r := range info.Registries {
+		s := "secure"
+		if !r.Secure {
+			s = "insecure"
+		}
+		regs = append(regs, fmt.Sprintf("%s (%s)", r.Name, s))
+	}
+	fmt.Fprintf(cli.out, "%s\n", strings.Join(regs, ", "))
+
 	return nil
 }

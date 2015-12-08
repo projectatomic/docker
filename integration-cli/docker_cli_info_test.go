@@ -101,3 +101,17 @@ func (s *DockerSuite) TestInfoDiscoveryAdvertiseInterfaceName(c *check.C) {
 	c.Assert(out, checker.Contains, fmt.Sprintf("Cluster store: %s\n", discoveryBackend))
 	c.Assert(out, checker.Contains, fmt.Sprintf("Cluster advertise: %s:2375\n", ip.String()))
 }
+
+func (s *DockerSuite) TestInfoRegistries(c *check.C) {
+	out, _ := dockerCmd(c, "info")
+	c.Assert(out, checker.Contains, "127.0.0.0/8 (insecure), docker.io (secure)")
+}
+
+func (s *DockerRegistriesSuite) TestInfoRegistriesAdditional(c *check.C) {
+	d := NewDaemon(c)
+	c.Assert(d.StartWithBusybox("--add-registry="+s.reg1.url, "--insecure-registry="+s.reg2.url), check.IsNil)
+	defer d.Stop()
+	out, _ := d.Cmd("info")
+	c.Assert(out, checker.Contains, s.reg1.url+" (insecure)")
+	c.Assert(out, checker.Contains, s.reg2.url+" (insecure)")
+}

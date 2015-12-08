@@ -1,6 +1,7 @@
 package daemon
 
 import (
+	"net"
 	"os"
 	"runtime"
 	"strings"
@@ -18,7 +19,7 @@ import (
 	"github.com/docker/docker/pkg/system"
 	"github.com/docker/docker/registry"
 	"github.com/docker/docker/utils"
-	"github.com/docker/docker/volume/drivers"
+	volumedrivers "github.com/docker/docker/volume/drivers"
 )
 
 // SystemInfo returns information about the host server the daemon is running on.
@@ -54,6 +55,14 @@ func (daemon *Daemon) SystemInfo() (*types.Info, error) {
 	// by hand given VERSION)
 	initPath := utils.DockerInitPath("")
 	sysInfo := sysinfo.New(true)
+
+	registries := []types.Registry{}
+	for _, ir := range daemon.RegistryService.Config.InsecureRegistryCIDRs {
+		registries = append(registries, types.Registry{(*net.IPNet)(ir).String(), false})
+	}
+	for n, i := range daemon.RegistryService.Config.IndexConfigs {
+		registries = append(registries, types.Registry{n, i.Secure})
+	}
 
 	v := &types.Info{
 		ID:                 daemon.ID,
@@ -91,6 +100,7 @@ func (daemon *Daemon) SystemInfo() (*types.Info, error) {
 		HTTPProxy:          getProxyEnv("http_proxy"),
 		HTTPSProxy:         getProxyEnv("https_proxy"),
 		NoProxy:            getProxyEnv("no_proxy"),
+		Registries:         registries,
 	}
 
 	// TODO Windows. Refactor this more once sysinfo is refactored into
