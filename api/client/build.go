@@ -31,6 +31,7 @@ import (
 	"github.com/docker/docker/registry"
 	tagpkg "github.com/docker/docker/tag"
 	"github.com/docker/docker/utils"
+	"github.com/docker/docker/volume"
 )
 
 // CmdBuild builds a new image from the source code at a given path.
@@ -60,6 +61,9 @@ func (cli *DockerCli) CmdBuild(args ...string) error {
 	flBuildArg := opts.NewListOpts(opts.ValidateEnv)
 	cmd.Var(&flBuildArg, []string{"-build-arg"}, "Set build-time variables")
 	isolation := cmd.String([]string{"-isolation"}, "", "Container isolation level")
+
+	flBuildVolumes := opts.NewListOpts(nil)
+	cmd.Var(&flBuildVolumes, []string{"v", "-volume"}, "Set build-time bind mounts")
 
 	ulimits := make(map[string]*ulimit.Ulimit)
 	flUlimits := opts.NewUlimitOpt(&ulimits)
@@ -200,6 +204,21 @@ func (cli *DockerCli) CmdBuild(args ...string) error {
 		remoteContext = cmd.Arg(0)
 	}
 
+	var binds []string
+	// add any bind targets to the list of container volumes
+	for bind := range flBuildVolumes.GetMap() {
+		if arr := volume.SplitN(bind, 2); len(arr) > 1 {
+			// after creating the bind mount we want to delete it from the flBuildVolumes values because
+			// we do not want bind mounts being committed to image configs
+			binds = append(binds, bind)
+			flBuildVolumes.Delete(bind)
+		}
+	}
+
+	if len(flBuildVolumes.GetMap()) > 0 {
+		return fmt.Errorf("Volumes aren't supported in docker build. Please use only bind mounts.")
+	}
+
 	options := types.ImageBuildOptions{
 		Context:        body,
 		Memory:         memory,
@@ -223,6 +242,7 @@ func (cli *DockerCli) CmdBuild(args ...string) error {
 		Ulimits:        flUlimits.GetList(),
 		BuildArgs:      flBuildArg.GetAll(),
 		AuthConfigs:    cli.configFile.AuthConfigs,
+		Binds:          binds,
 	}
 
 	response, err := cli.client.ImageBuild(options)

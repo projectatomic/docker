@@ -37,6 +37,7 @@ import (
 	"github.com/docker/docker/pkg/tarsum"
 	"github.com/docker/docker/pkg/urlutil"
 	"github.com/docker/docker/runconfig"
+	volumePkg "github.com/docker/docker/volume"
 )
 
 func (b *Builder) commit(id string, autoCmd *stringutils.StrSlice, comment string) error {
@@ -466,6 +467,9 @@ func (b *Builder) probeCache() (bool, error) {
 	if !ok || !b.UseCache || b.cacheBusted {
 		return false, nil
 	}
+	if len(b.Binds) > 0 {
+		return false, nil
+	}
 	cache, err := c.GetCachedImage(b.image, b.runConfig)
 	if err != nil {
 		return false, err
@@ -505,11 +509,44 @@ func (b *Builder) create() (*container.Container, error) {
 		Ulimits:      b.Ulimits,
 	}
 
+	// ensure no rw flag is passed in bind-mounts.
+	// if it is just warn it's ignored
+	// and eventually build will fail itself trying to write to ro bind mounts
+	// also change everything to :ro
+	var warnings []string
+	for i, bind := range b.Binds {
+		arr := strings.Split(bind, ":")
+		switch len(arr) {
+		case 2:
+			b.Binds[i] = strings.Join([]string{arr[0], arr[1], "ro"}, ":")
+			break
+		case 3:
+			if volumePkg.ReadWrite(arr[2]) {
+				warnings = append(warnings, fmt.Sprintf("bind mount mode is read-write for %s, it will be changed to read-only", bind))
+				mode := "ro"
+				if strings.Contains(arr[2], "z") {
+					mode = mode + ",z"
+				} else if strings.Contains(arr[2], "Z") {
+					mode = mode + ",Z"
+				}
+				b.Binds[i] = strings.Join([]string{arr[0], arr[1], mode}, ":")
+			}
+			break
+		default:
+			// just skip, run will validate them all...
+		}
+	}
+
+	for _, warning := range warnings {
+		fmt.Fprintf(b.Stdout, " ---> [Warning] %s\n", warning)
+	}
+
 	// TODO: why not embed a hostconfig in builder?
 	hostConfig := &runconfig.HostConfig{
 		Isolation: b.Isolation,
 		ShmSize:   b.ShmSize,
 		Resources: resources,
+		Binds:     b.Binds,
 	}
 
 	config := *b.runConfig

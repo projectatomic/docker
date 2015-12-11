@@ -59,6 +59,7 @@ type Config struct {
 	// resource constraints
 	// TODO: factor out to be reused with Run ?
 
+	Binds        []string
 	Memory       int64
 	MemorySwap   int64
 	ShmSize      *int64
