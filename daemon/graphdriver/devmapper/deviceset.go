@@ -71,6 +71,7 @@ type devInfo struct {
 	TransactionID uint64 `json:"transaction_id"`
 	Initialized   bool   `json:"initialized"`
 	Deleted       bool   `json:"deleted"`
+	FileSystem    string `json:"filesystem"`
 	devices       *DeviceSet
 
 	mountCount int
@@ -594,6 +595,7 @@ func (devices *DeviceSet) createFilesystem(info *devInfo) (err error) {
 	if devices.filesystem == "" {
 		devices.filesystem = determineDefaultFS()
 	}
+	info.FileSystem = devices.filesystem
 
 	logrus.Infof("devmapper: Creating filesystem %s on device %s", devices.filesystem, info.Name())
 	defer func() {
@@ -926,6 +928,11 @@ func (devices *DeviceSet) verifyBaseDeviceUUIDFS(baseInfo *devInfo) error {
 	// If user specified a filesystem using dm.fs option and current
 	// file system of base image is not same, warn user that dm.fs
 	// will be ignored.
+	//
+	// bad luck, this check will always be done because we now store
+	// the first base fs type in the metadata and load it but it won't
+	// matter here because if dm.fs is passed not previously fs type is
+	// set
 	if devices.filesystem != "" {
 		fs, err := ProbeFsType(baseInfo.DevName())
 		if err != nil {
@@ -1065,10 +1072,40 @@ func (devices *DeviceSet) setupBaseImage() error {
 			if err := devices.setupVerifyBaseImageUUIDFS(oldInfo); err != nil {
 				return err
 			}
+
+			// at every run no dm.fs is passed -> devices.filesystem == ""
+			// first graph init at first run -> devices.filesystem != ""
+			// calling docker info after init returns base fs type
+			// calling docker info after the first init returns an empty basefstype
+			//
+			// that's because:
+			//
+			// on first graph init -> devices.filesystem not stored anywhere &&
+			// on second and later init -> devices.filesystem is always == "" unless
+			// you passed dm.fs and it's not the same as the probed fs type in verifyBaseDeviceUUIDFS
+			//
+			// So, first check if we previosly stored anything
+			//
+			// We make this check here and not before setupVerifyBaseImageUUIDFS
+			// because it can call verifyBaseDeviceUUIDFS and check for dm.fs which
+			// comes from devices.filesystem so we won't overwrite it before.
+			if oldInfo.FileSystem != "" {
+				// if we did load it
+				devices.filesystem = oldInfo.FileSystem
+			} else {
+				// otherwise probe fs type
+				fstype, err := ProbeFsType(oldInfo.DevName())
+				if err != nil {
+					return err
+				}
+				devices.filesystem = fstype
+			}
+
 			if devices.baseFsSize != defaultBaseFsSize && devices.baseFsSize != devices.getBaseDeviceSize() {
 				logrus.Warnf("Base device is already initialized to size %s, new value of base device size %s will not take effect",
 					units.HumanSize(float64(devices.getBaseDeviceSize())), units.HumanSize(float64(devices.baseFsSize)))
 			}
+
 			return nil
 		}
 
