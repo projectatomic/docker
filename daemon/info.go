@@ -13,6 +13,7 @@ import (
 	"github.com/docker/docker/pkg/parsers/kernel"
 	"github.com/docker/docker/pkg/parsers/operatingsystem"
 	"github.com/docker/docker/pkg/platform"
+	"github.com/docker/docker/pkg/rpm"
 	"github.com/docker/docker/pkg/sysinfo"
 	"github.com/docker/docker/pkg/system"
 	"github.com/docker/docker/registry"
@@ -53,6 +54,7 @@ func (daemon *Daemon) SystemInfo() (*types.Info, error) {
 	// by hand given VERSION)
 	initPath := utils.DockerInitPath("")
 	sysInfo := sysinfo.New(true)
+	packageVersion, _ := rpm.Version("/usr/bin/docker")
 
 	v := &types.Info{
 		ID:                 daemon.ID,
@@ -90,6 +92,7 @@ func (daemon *Daemon) SystemInfo() (*types.Info, error) {
 		HTTPProxy:          getProxyEnv("http_proxy"),
 		HTTPSProxy:         getProxyEnv("https_proxy"),
 		NoProxy:            getProxyEnv("no_proxy"),
+		PkgVersion:         packageVersion,
 	}
 
 	// TODO Windows. Refactor this more once sysinfo is refactored into
@@ -115,6 +118,7 @@ func (daemon *Daemon) SystemInfo() (*types.Info, error) {
 
 // SystemVersion returns version information about the daemon.
 func (daemon *Daemon) SystemVersion() types.Version {
+	pkgVersion, _ := rpm.Version("/usr/bin/docker")
 	v := types.Version{
 		Version:      dockerversion.Version,
 		GitCommit:    dockerversion.GitCommit,
@@ -123,6 +127,7 @@ func (daemon *Daemon) SystemVersion() types.Version {
 		Arch:         runtime.GOARCH,
 		BuildTime:    dockerversion.BuildTime,
 		Experimental: utils.ExperimentalBuild(),
+		PkgVersion:   pkgVersion,
 	}
 
 	if kernelVersion, err := kernel.GetKernelVersion(); err == nil {
