@@ -213,15 +213,16 @@ func (cli *DaemonCli) CmdDaemon(args ...string) error {
 		}
 		serverConfig.Addrs = append(serverConfig.Addrs, apiserver.Addr{Proto: protoAddrParts[0], Addr: protoAddrParts[1]})
 	}
-	api, err := apiserver.New(serverConfig)
-	if err != nil {
-		logrus.Fatal(err)
-	}
 
 	if err := migrateKey(); err != nil {
 		logrus.Fatal(err)
 	}
 	cli.TrustKeyPath = commonFlags.TrustKey
+
+	api, err := apiserver.New(serverConfig)
+	if err != nil {
+		logrus.Fatal(err)
+	}
 
 	registryService := registry.NewService(cli.registryOptions)
 	d, err := daemon.NewDaemon(cli.Config, registryService)
@@ -235,6 +236,8 @@ func (cli *DaemonCli) CmdDaemon(args ...string) error {
 	}
 
 	logrus.Info("Daemon has completed initialization")
+
+	api.SetDaemon(d)
 
 	logrus.WithFields(logrus.Fields{
 		"version":     dockerversion.Version,

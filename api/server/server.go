@@ -42,6 +42,7 @@ type Config struct {
 // Server contains instance details for the server
 type Server struct {
 	cfg          *Config
+	daemon       *daemon.Daemon
 	servers      []*HTTPServer
 	routers      []router.Router
 	authZPlugins []authorization.Plugin
@@ -77,6 +78,11 @@ func (s *Server) Close() {
 			logrus.Error(err)
 		}
 	}
+}
+
+// SetDaemon initializes the daemon field
+func (s *Server) SetDaemon(daemon *daemon.Daemon) {
+	s.daemon = daemon
 }
 
 // ServeAPI loops through all initialized servers and spawns goroutine
