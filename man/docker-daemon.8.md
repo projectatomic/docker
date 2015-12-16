@@ -6,10 +6,12 @@ docker-daemon - Enable daemon mode
 
 # SYNOPSIS
 **docker daemon**
+[**--add-registry**[=*[]*]]
 [**--api-cors-header**=[=*API-CORS-HEADER*]]
 [**--authz-plugin**[=*[]*]]
 [**-b**|**--bridge**[=*BRIDGE*]]
 [**--bip**[=*BIP*]]
+[**--block-registry**[=*[]*]]
 [**--cluster-store**[=*[]*]]
 [**--cluster-advertise**[=*[]*]]
 [**--cluster-store-opt**[=*map[]*]]
@@ -68,6 +70,9 @@ format.
 
 # OPTIONS
 
+**--add-registry**=[]
+  **EXPERIMENTAL** Each given registry will be queried before a public Docker registry during image pulls or searches. They will be searched in the order given. Registry mirrors won't apply to them.
+
 **--api-cors-header**=""
   Set CORS headers in the remote API. Default is cors disabled. Give urls like "http://foo, http://bar, ...". Give "*" to allow all.
 
@@ -79,6 +84,9 @@ format.
 
 **--bip**=""
   Use the provided CIDR notation address for the dynamically created bridge (docker0); Mutually exclusive of \-b
+
+**--block-registry**=[]
+  **EXPERIMENTAL** Prevent Docker daemon from contacting specified registries. There are two special keywords recognized. The first is "public" and represents public Docker registry. The second is "all" which causes all registries but those added with **--add-registry** flag to be blocked.
 
 **--cluster-store**=""
   URL of the distributed storage backend

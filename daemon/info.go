@@ -75,7 +75,7 @@ func (daemon *Daemon) SystemInfo() (*types.Info, error) {
 		NEventsListener:    daemon.EventsService.SubscribersCount(),
 		KernelVersion:      kernelVersion,
 		OperatingSystem:    operatingSystem,
-		IndexServerAddress: registry.IndexServer,
+		IndexServerAddress: registry.IndexServerAddress(),
 		OSType:             platform.OSType,
 		Architecture:       platform.Architecture,
 		RegistryConfig:     daemon.RegistryService.Config,

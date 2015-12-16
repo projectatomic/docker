@@ -10,6 +10,7 @@ import (
 	"github.com/docker/docker/api/types/filters"
 	"github.com/docker/docker/image"
 	"github.com/docker/docker/layer"
+	"github.com/docker/docker/registry"
 )
 
 var acceptedImageFilterTags = map[string]bool{
@@ -28,6 +29,53 @@ func (r byCreated) Less(i, j int) bool { return r[i].Created < r[j].Created }
 // Map returns a map of all images in the ImageStore
 func (daemon *Daemon) Map() map[image.ID]*image.Image {
 	return daemon.imageStore.Map()
+}
+
+func matchReference(filter string, ref reference.Named) bool {
+	if filter == "" {
+		return true
+	}
+
+	var filterTagged bool
+	filterRef, err := reference.Parse(filter)
+	if err == nil { // parse error means wildcard repo
+		if _, ok := filterRef.(reference.Tagged); ok {
+			filterTagged = true
+		}
+	}
+
+	refBelongsToDefaultRegistry := false
+	indexName, remoteNameStr := reference.SplitHostname(ref)
+	for _, reg := range registry.RegistryList {
+		if indexName == reg || indexName == "" {
+			refBelongsToDefaultRegistry = true
+			break
+		}
+	}
+
+	// If the repository belongs to default registry, match against fully
+	// qualified and unqualified name.
+	references := []reference.Named{ref}
+	if registry.IsReferenceFullyQualified(ref) && refBelongsToDefaultRegistry {
+		newRef, err := registry.SubstituteReferenceName(ref, remoteNameStr)
+		if err == nil {
+			references = append(references, newRef)
+		}
+	}
+
+	for _, ref := range references {
+		if filterTagged {
+			// filter by tag, require full ref match
+			if ref.String() == filter {
+				return true
+			}
+		} else if matched, err := path.Match(filter, ref.Name()); matched && err == nil {
+			// name only match, FIXME: docs say exact
+			return true
+		}
+	}
+
+	return false
 }
 
 // Images returns a filtered list of images. filterArgs is a JSON-encoded set
@@ -66,16 +114,6 @@ func (daemon *Daemon) Images(filterArgs, filter string, all bool) ([]*types.Imag
 
 	images := []*types.Image{}
 
-	var filterTagged bool
-	if filter != "" {
-		filterRef, err := reference.Parse(filter)
-		if err == nil { // parse error means wildcard repo
-			if _, ok := filterRef.(reference.Tagged); ok {
-				filterTagged = true
-			}
-		}
-	}
-
 	for id, img := range allImages {
 		if imageFilters.Include("label") {
 			// Very old image that do not have image.Config (or even labels)
@@ -106,15 +144,10 @@ func (daemon *Daemon) Images(filterArgs, filter string, all bool) ([]*types.Imag
 		newImage := newImage(img, size)
 
 		for _, ref := range daemon.tagStore.References(id) {
-			if filter != "" { // filter by tag/repo name
-				if filterTagged { // filter by tag, require full ref match
-					if ref.String() != filter {
-						continue
-					}
-				} else if matched, err := path.Match(filter, ref.Name()); !matched || err != nil { // name only match, FIXME: docs say exact
-					continue
-				}
+			if !matchReference(filter, ref) {
+				continue
 			}
+
 			if _, ok := ref.(reference.Digested); ok {
 				newImage.RepoDigests = append(newImage.RepoDigests, ref.String())
 			}

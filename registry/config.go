@@ -36,9 +36,19 @@ const (
 	NotaryServer = "https://notary.docker.io"
 
 	// IndexServer = "https://registry-stage.hub.docker.com/v1/"
+
+	// OfficialReposNamePrefix is a remote name component of official
+	// repositories. It is stripped from repository local name.
+	OfficialReposNamePrefix = "library/"
 )
 
 var (
+	// BlockedRegistries is a set of registries that can't be contacted. A
+	// special entry "*" causes all registries but those present in
+	// RegistryList to be blocked.
+	BlockedRegistries map[string]struct{}
+	// RegistryList is a list of default registries..
+	RegistryList = []string{IndexName}
 	// ErrInvalidRepositoryName is an error returned if the repository name did
 	// not have the correct form
 	ErrInvalidRepositoryName = errors.New("Invalid repository name (ex: \"registry.domain.tld/myrepos\")")
@@ -49,6 +59,29 @@ var (
 	// command line flag the daemon will not attempt to contact v1 legacy registries
 	V2Only = false
 )
+
+func init() {
+	BlockedRegistries = make(map[string]struct{})
+}
+
+// IndexServerName returns the name of default index server.
+func IndexServerName() string {
+	if len(RegistryList) < 1 {
+		return ""
+	}
+	return RegistryList[0]
+}
+
+// IndexServerAddress returns index uri of default registry.
+func IndexServerAddress() string {
+	if IndexServerName() == IndexName {
+		return IndexServer
+	} else if IndexServerName() == "" {
+		return ""
+	} else {
+		return fmt.Sprintf("https://%s/v1/", IndexServerName())
+	}
+}
 
 // InstallFlags adds command-line options to the top-level flag parser for
 // the current process.
@@ -101,12 +134,22 @@ func NewServiceConfig(options *Options) *registrytypes.ServiceConfig {
 		}
 	}
 
-	// Configure public registry.
-	config.IndexConfigs[IndexName] = &registrytypes.IndexInfo{
-		Name:     IndexName,
-		Mirrors:  config.Mirrors,
-		Secure:   true,
-		Official: true,
+	for _, r := range RegistryList {
+		var mirrors []string
+		if config.IndexConfigs[r] == nil {
+			// Use mirrors only with official index
+			if r == IndexName {
+				mirrors = config.Mirrors
+			} else {
+				mirrors = make([]string, 0)
+			}
+			config.IndexConfigs[r] = &registrytypes.IndexInfo{
+				Name:     r,
+				Mirrors:  mirrors,
+				Secure:   isSecureIndex(config, r),
+				Official: r == IndexName,
+			}
+		}
 	}
 
 	return config
@@ -128,6 +171,9 @@ func isSecureIndex(config *registrytypes.ServiceConfig, indexName string) bool {
 	// is called from anything besides newIndexInfo, in order to honor per-index configurations.
 	if index, ok := config.IndexConfigs[indexName]; ok {
 		return index.Secure
+	}
+	if indexName == IndexName {
+		return true
 	}
 
 	host, _, err := net.SplitHostPort(indexName)
@@ -185,6 +231,14 @@ func ValidateIndexName(val string) (string, error) {
 	if val == "index."+IndexName {
 		val = IndexName
 	}
+	for _, r := range RegistryList {
+		if val == r {
+			break
+		}
+		if val == "index."+r {
+			val = r
+		}
+	}
 	if strings.HasPrefix(val, "-") || strings.HasSuffix(val, "-") {
 		return "", fmt.Errorf("Invalid index name (%s). Cannot begin or end with a hyphen.", val)
 	}
@@ -223,7 +277,7 @@ func loadRepositoryName(reposName reference.Named) (string, reference.Named, err
 	if err := validateNoSchema(reposName.Name()); err != nil {
 		return "", nil, err
 	}
-	indexName, remoteName, err := splitReposName(reposName)
+	indexName, remoteName, err := splitReposName(reposName, false)
 
 	if indexName, err = ValidateIndexName(indexName); err != nil {
 		return "", nil, err
@@ -232,6 +286,13 @@ func loadRepositoryName(reposName reference.Named) (string, reference.Named, err
 		return "", nil, err
 	}
 	return indexName, remoteName, nil
+}
+
+// IsReferenceFullyQualified determines whether the given reposName has prepended
+// name of index.
+func IsReferenceFullyQualified(reposName reference.Named) bool {
+	indexName, _, _ := splitReposName(reposName, false)
+	return indexName != ""
 }
 
 // newIndexInfo returns IndexInfo configuration from indexName
@@ -251,9 +312,10 @@ func newIndexInfo(config *registrytypes.ServiceConfig, indexName string) (*regis
 	index := &registrytypes.IndexInfo{
 		Name:     indexName,
 		Mirrors:  make([]string, 0),
-		Official: false,
+		Official: indexName == IndexName,
+		Secure:   isSecureIndex(config, indexName),
 	}
-	index.Secure = isSecureIndex(config, indexName)
+
 	return index, nil
 }
 
@@ -267,19 +329,42 @@ func GetAuthConfigKey(index *registrytypes.IndexInfo) string {
 }
 
 // splitReposName breaks a reposName into an index name and remote name
-func splitReposName(reposName reference.Named) (indexName string, remoteName reference.Named, err error) {
+// fixMissingIndex says to return current index server name if missing in
+// reposName
+func splitReposName(reposName reference.Named, fixMissingIndex bool) (indexName string, remoteName reference.Named, err error) {
 	var remoteNameStr string
 	indexName, remoteNameStr = reference.SplitHostname(reposName)
 	if indexName == "" || (!strings.Contains(indexName, ".") &&
 		!strings.Contains(indexName, ":") && indexName != "localhost") {
 		// This is a Docker Index repos (ex: samalba/hipache or ubuntu)
 		// 'docker.io'
-		indexName = IndexName
+		if fixMissingIndex {
+			indexName = IndexServerName()
+		} else {
+			indexName = ""
+		}
 		remoteName = reposName
 	} else {
 		remoteName, err = reference.WithName(remoteNameStr)
 	}
 	return
+}
+
+// IsIndexBlocked allows to check whether index/registry or endpoint
+// is on a block list.
+func IsIndexBlocked(indexName string) bool {
+	if _, ok := BlockedRegistries[indexName]; ok {
+		return true
+	}
+	if _, ok := BlockedRegistries["*"]; ok {
+		for _, name := range RegistryList {
+			if indexName == name {
+				return false
+			}
+		}
+		return true
+	}
+	return false
 }
 
 // newRepositoryInfo validates and breaks down a repository name into a RepositoryInfo
@@ -298,6 +383,9 @@ func newRepositoryInfo(config *registrytypes.ServiceConfig, reposName reference.
 	if err != nil {
 		return nil, err
 	}
+	if indexName == "" {
+		indexName = IndexServerName()
+	}
 
 	repoInfo.Index, err = newIndexInfo(config, indexName)
 	if err != nil {
@@ -305,24 +393,28 @@ func newRepositoryInfo(config *registrytypes.ServiceConfig, reposName reference.
 	}
 
 	if repoInfo.Index.Official {
-		repoInfo.LocalName, err = normalizeLibraryRepoName(repoInfo.RemoteName)
+		normalizedName, err := normalizeLibraryRepoName(repoInfo.RemoteName)
 		if err != nil {
 			return nil, err
 		}
-		repoInfo.RemoteName = repoInfo.LocalName
+		repoInfo.RemoteName = normalizedName
 
 		// If the normalized name does not contain a '/' (e.g. "foo")
 		// then it is an official repo.
 		if strings.IndexRune(repoInfo.RemoteName.Name(), '/') == -1 {
 			repoInfo.Official = true
 			// Fix up remote name for official repos.
-			repoInfo.RemoteName, err = reference.WithName("library/" + repoInfo.RemoteName.Name())
+			repoInfo.RemoteName, err = reference.WithName(OfficialReposNamePrefix + repoInfo.RemoteName.Name())
 			if err != nil {
 				return nil, err
 			}
 		}
 
-		repoInfo.CanonicalName, err = reference.WithName("docker.io/" + repoInfo.RemoteName.Name())
+		repoInfo.CanonicalName, err = reference.WithName(IndexName + "/" + repoInfo.RemoteName.Name())
+		if err != nil {
+			return nil, err
+		}
+		repoInfo.LocalName, err = reference.WithName(repoInfo.Index.Name + "/" + normalizedName.Name())
 		if err != nil {
 			return nil, err
 		}
@@ -357,12 +449,21 @@ func ParseSearchIndexInfo(reposName string) (*registrytypes.IndexInfo, error) {
 // NormalizeLocalName transforms a repository name into a normalized LocalName
 // Passes through the name without transformation on error (image id, etc)
 // It does not use the repository info because we don't want to load
-// the repository index and do request over the network.
-func NormalizeLocalName(name reference.Named) reference.Named {
+// the repository index and do request over the network. Returned reference
+// will always be fully qualified unless an error occurs or there's no
+// default registry.
+func NormalizeLocalName(name reference.Named, keepUnqualified bool) reference.Named {
 	indexName, remoteName, err := loadRepositoryName(name)
 	if err != nil {
 		return name
 	}
+
+	fullyQualified := true
+	if indexName == "" {
+		indexName = IndexServerName()
+		fullyQualified = false
+	}
+	fullyQualify := !keepUnqualified || fullyQualified
 
 	var officialIndex bool
 	// Return any configured index info, first.
@@ -371,11 +472,22 @@ func NormalizeLocalName(name reference.Named) reference.Named {
 	}
 
 	if officialIndex {
-		localName, err := normalizeLibraryRepoName(remoteName)
+		localName := remoteName
+		if fullyQualify {
+			localName, err = reference.WithName(IndexName + "/" + remoteName.Name())
+			if err != nil {
+				return name
+			}
+		}
+		localName, err = normalizeLibraryRepoName(localName)
 		if err != nil {
 			return name
 		}
 		return localName
+	}
+
+	if !fullyQualify {
+		indexName = ""
 	}
 	localName, err := localNameFromRemote(indexName, remoteName)
 	if err != nil {
@@ -387,24 +499,34 @@ func NormalizeLocalName(name reference.Named) reference.Named {
 // normalizeLibraryRepoName removes the library prefix from
 // the repository name for official repos.
 func normalizeLibraryRepoName(name reference.Named) (reference.Named, error) {
-	if strings.HasPrefix(name.Name(), "library/") {
-		// If pull "library/foo", it's stored locally under "foo"
-		return reference.WithName(strings.SplitN(name.Name(), "/", 2)[1])
+	indexName, remoteName, err := splitReposName(name, false)
+	if err != nil {
+		return nil, err
 	}
-	return name, nil
+	remoteName, err = reference.WithName(strings.TrimPrefix(remoteName.Name(), OfficialReposNamePrefix))
+	if err != nil {
+		return nil, err
+	}
+	if indexName == "" {
+		return remoteName, nil
+	}
+	return reference.WithName(indexName + "/" + remoteName.Name())
 }
 
 // localNameFromRemote combines the index name and the repo remote name
 // to generate a repo local name.
 func localNameFromRemote(indexName string, remoteName reference.Named) (reference.Named, error) {
+	if indexName == "" {
+		return remoteName, nil
+	}
 	return reference.WithName(indexName + "/" + remoteName.Name())
 }
 
 // NormalizeLocalReference transforms a reference to use a normalized LocalName
 // for the name poriton. Passes through the reference without transformation on
 // error.
-func NormalizeLocalReference(ref reference.Named) reference.Named {
-	localName := NormalizeLocalName(ref)
+func NormalizeLocalReference(ref reference.Named, keepUnqualified bool) reference.Named {
+	localName := NormalizeLocalName(ref, keepUnqualified)
 	if tagged, isTagged := ref.(reference.Tagged); isTagged {
 		newRef, err := reference.WithTag(localName, tagged.Tag())
 		if err != nil {
@@ -419,4 +541,55 @@ func NormalizeLocalReference(ref reference.Named) reference.Named {
 		return newRef
 	}
 	return localName
+}
+
+// FullyQualifyReferenceWith joins given index name with reference. If the
+// reference is already qualified or resulting reference is invalid, an error
+// will be returned.
+func FullyQualifyReferenceWith(indexName string, ref reference.Named) (reference.Named, error) {
+	if indexName == "" {
+		return nil, fmt.Errorf("index name cannot be empty")
+	}
+	fqn, err := reference.WithName(indexName + "/" + ref.Name())
+	if err != nil {
+		return nil, err
+	}
+	fqn = NormalizeLocalName(fqn, false)
+	if tagged, isTagged := ref.(reference.Tagged); isTagged {
+		newRef, err := reference.WithTag(fqn, tagged.Tag())
+		if err != nil {
+			return nil, err
+		}
+		return newRef, nil
+	} else if digested, isDigested := ref.(reference.Digested); isDigested {
+		newRef, err := reference.WithDigest(fqn, digested.Digest())
+		if err != nil {
+			return nil, err
+		}
+		return newRef, nil
+	}
+	return fqn, nil
+}
+
+// SubstituteReferenceName creates a new image reference from given ref with
+// its *name* part substituted for reposName.
+func SubstituteReferenceName(ref reference.Named, reposName string) (newRef reference.Named, err error) {
+	reposNameRef, err := reference.WithName(reposName)
+	if err != nil {
+		return nil, err
+	}
+	if tagged, isTagged := ref.(reference.Tagged); isTagged {
+		newRef, err = reference.WithTag(reposNameRef, tagged.Tag())
+		if err != nil {
+			return nil, err
+		}
+	} else if digested, isDigested := ref.(reference.Digested); isDigested {
+		newRef, err = reference.WithDigest(reposNameRef, digested.Digest())
+		if err != nil {
+			return nil, err
+		}
+	} else {
+		newRef = reposNameRef
+	}
+	return
 }

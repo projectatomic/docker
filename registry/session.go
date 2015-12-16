@@ -177,6 +177,10 @@ func NewSession(client *http.Client, authConfig *types.AuthConfig, endpoint *End
 		}
 	}
 
+	if endpoint != nil && isEndpointURLBlocked(endpoint.URL.Host) {
+		return nil, fmt.Errorf("Index %q is blocked.", endpoint.URL.Host)
+	}
+
 	r = &Session{
 		authConfig:    authConfig,
 		client:        client,
@@ -321,6 +325,31 @@ func (r *Session) GetRemoteImageLayer(imgID, registry string, imgSize int64) (io
 	return res.Body, nil
 }
 
+func isEndpointURLBlocked(endpoint string) bool {
+	if parsedURL, err := url.Parse(endpoint); err == nil {
+		if !IsIndexBlocked(parsedURL.Host) {
+			return false
+		}
+	}
+	return true
+}
+
+func isEndpointBlocked(endpoint APIEndpoint) bool {
+	return isEndpointURLBlocked(endpoint.URL)
+}
+
+func filterBlockedEndpoints(endpoints []APIEndpoint) []APIEndpoint {
+	res := []APIEndpoint{}
+	for _, endpoint := range endpoints {
+		if !isEndpointBlocked(endpoint) {
+			res = append(res, endpoint)
+		} else {
+			logrus.Infof("Skipping blocked endpoint %q", endpoint.URL)
+		}
+	}
+	return res
+}
+
 // GetRemoteTag retrieves the tag named in the askedTag argument from the given
 // repository. It queries each of the registries supplied in the registries
 // argument, and returns data from the first one that answers the query
@@ -328,12 +357,16 @@ func (r *Session) GetRemoteImageLayer(imgID, registry string, imgSize int64) (io
 func (r *Session) GetRemoteTag(registries []string, repositoryRef reference.Named, askedTag string) (string, error) {
 	repository := repositoryRef.Name()
 
-	if strings.Count(repository, "/") == 0 {
-		// This will be removed once the registry supports auto-resolution on
-		// the "library" namespace
-		repository = "library/" + repository
-	}
 	for _, host := range registries {
+		if host == IndexServer && strings.Count(repository, "/") == 0 {
+			// This will be removed once the registry supports auto-resolution on
+			// the "library" namespace
+			repository = OfficialReposNamePrefix + repository
+		}
+		if isEndpointURLBlocked(host) {
+			logrus.Errorf("Cannot query blocked registry at %s for remote tags.", host)
+			continue
+		}
 		endpoint := fmt.Sprintf("%srepositories/%s/tags/%s", host, repository, askedTag)
 		res, err := r.client.Get(endpoint)
 		if err != nil {
@@ -366,12 +399,16 @@ func (r *Session) GetRemoteTag(registries []string, repositoryRef reference.Name
 func (r *Session) GetRemoteTags(registries []string, repositoryRef reference.Named) (map[string]string, error) {
 	repository := repositoryRef.Name()
 
-	if strings.Count(repository, "/") == 0 {
-		// This will be removed once the registry supports auto-resolution on
-		// the "library" namespace
-		repository = "library/" + repository
-	}
 	for _, host := range registries {
+		if host == IndexServer && strings.Count(repository, "/") == 0 {
+			// This will be removed once the registry supports auto-resolution on
+			// the "library" namespace
+			repository = OfficialReposNamePrefix + repository
+		}
+		if isEndpointURLBlocked(host) {
+			logrus.Errorf("Cannot query blocked registry at %s for remote tags.", host)
+			continue
+		}
 		endpoint := fmt.Sprintf("%srepositories/%s/tags", host, repository)
 		res, err := r.client.Get(endpoint)
 		if err != nil {

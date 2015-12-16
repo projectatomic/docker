@@ -125,7 +125,7 @@ func (daemon *Daemon) Commit(name string, c *types.ContainerCommitConfig) (strin
 				return "", err
 			}
 		}
-		if err := daemon.TagImage(newTag, id.String()); err != nil {
+		if err := daemon.TagImage(newTag, id.String(), true); err != nil {
 			return "", err
 		}
 	}

@@ -75,8 +75,8 @@ func (l *tarexporter) parseNames(names []string) (map[image.ID]*imageDescriptor,
 		if err != nil {
 			return nil, err
 		}
-		ref = registry.NormalizeLocalReference(ref)
-		if ref.Name() == string(digest.Canonical) {
+		normalized := registry.NormalizeLocalReference(ref, true)
+		if normalized.Name() == string(digest.Canonical) {
 			imgID, err := l.is.Search(name)
 			if err != nil {
 				return nil, err
@@ -84,8 +84,8 @@ func (l *tarexporter) parseNames(names []string) (map[image.ID]*imageDescriptor,
 			addAssoc(imgID, nil)
 			continue
 		}
-		if _, ok := ref.(reference.Digested); !ok {
-			if _, ok := ref.(reference.NamedTagged); !ok {
+		if _, ok := normalized.(reference.Digested); !ok {
+			if _, ok := normalized.(reference.NamedTagged); !ok {
 				assocs := l.ts.ReferencesByName(ref)
 				for _, assoc := range assocs {
 					addAssoc(assoc.ImageID, assoc.Ref)
@@ -101,10 +101,10 @@ func (l *tarexporter) parseNames(names []string) (map[image.ID]*imageDescriptor,
 			}
 		}
 		var imgID image.ID
-		if imgID, err = l.ts.Get(ref); err != nil {
+		if imgID, err = l.ts.Get(normalized); err != nil {
 			return nil, err
 		}
-		addAssoc(imgID, ref)
+		addAssoc(imgID, normalized)
 
 	}
 	return imgDescr, nil

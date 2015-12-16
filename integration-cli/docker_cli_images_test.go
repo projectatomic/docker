@@ -233,3 +233,58 @@ func (s *DockerSuite) TestImagesFilterNameWithPort(c *check.C) {
 	out, _ = dockerCmd(c, "images", tag+":no-such-tag")
 	c.Assert(out, checker.Not(checker.Contains), tag)
 }
+
+func (s *DockerDaemonSuite) doTestImagesWithAdditionalRegistry(c *check.C, publicBlocked bool) {
+	daemonArgs := []string{"--add-registry=example.com"}
+	if publicBlocked {
+		daemonArgs = append(daemonArgs, "--block-registry=public")
+	}
+	if err := s.d.StartWithBusybox(daemonArgs...); err != nil {
+		c.Fatalf("we should have been able to start the daemon with passing { %s } flags: %v", strings.Join(daemonArgs, ", "), err)
+	}
+
+	if out, err := s.d.Cmd("tag", "busybox", "example.com/busybox"); err != nil {
+		c.Fatalf("failed to tag image %s: error %v, output %q", "busybox", err, out)
+	}
+	if out, err := s.d.Cmd("tag", "busybox", "docker.io/busybox"); err != nil {
+		c.Fatalf("failed to tag image %s: error %v, output %q", "busybox", err, out)
+	}
+	if out, err := s.d.Cmd("tag", "busybox", "other.com/busybox"); err != nil {
+		c.Fatalf("failed to tag image %s: error %v, output %q", "busybox", err, out)
+	}
+
+	expected := []string{"busybox:latest", "example.com/busybox:latest"}
+	if !publicBlocked {
+		expected = append(expected, "docker.io/busybox:latest")
+	}
+	images := s.d.getImages(c, "*box")
+	if len(images) != len(expected) {
+		c.Errorf("got     : %v", images)
+		c.Errorf("expected: %v", expected)
+		c.Fatalf("got unexpected number of images (%d), expected: %d, images: %v", len(images), len(expected), images)
+	}
+	for _, exp := range expected {
+		if _, ok := images[exp]; !ok {
+			c.Errorf("expected image name %s, not found among images: %v", exp, images)
+		}
+	}
+
+	expected = []string{"docker.io/busybox:latest", "example.com/busybox:latest", "other.com/busybox:latest"}
+	images = s.d.getImages(c, "*/*box")
+	if len(images) != len(expected) {
+		c.Fatalf("got unexpected number of images (%d), expected: %d, images: %v", len(images), len(expected), images)
+	}
+	for _, exp := range expected {
+		if _, ok := images[exp]; !ok {
+			c.Errorf("expected image name %s, not found among images: %v", exp, images)
+		}
+	}
+}
+
+func (s *DockerDaemonSuite) TestImagesWithAdditionalRegistry(c *check.C) {
+	s.doTestImagesWithAdditionalRegistry(c, false)
+}
+
+func (s *DockerDaemonSuite) TestImagesWithPublicRegistryBlocked(c *check.C) {
+	s.doTestImagesWithAdditionalRegistry(c, true)
+}
