@@ -136,6 +136,7 @@ type ImageBuildOptions struct {
 	BuildArgs      []string
 	AuthConfigs    map[string]AuthConfig
 	Context        io.Reader
+	Binds          []string
 }
 
 // ImageBuildResponse holds information
