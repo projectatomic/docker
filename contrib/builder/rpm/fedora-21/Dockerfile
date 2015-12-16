@@ -5,7 +5,7 @@
 FROM fedora:21
 
 RUN yum install -y @development-tools fedora-packager
-RUN yum install -y btrfs-progs-devel device-mapper-devel glibc-static libseccomp-devel libselinux-devel libtool-ltdl-devel selinux-policy selinux-policy-devel sqlite-devel tar
+RUN yum install -y btrfs-progs-devel device-mapper-devel glibc-static libaudit-dev libseccomp-devel libselinux-devel libtool-ltdl-devel selinux-policy selinux-policy-devel sqlite-devel tar
 
 ENV SECCOMP_VERSION v2.2.3
 RUN buildDeps=' \

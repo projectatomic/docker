@@ -4,7 +4,7 @@
 
 FROM ubuntu:vivid
 
-RUN apt-get update && apt-get install -y apparmor bash-completion btrfs-tools build-essential curl ca-certificates debhelper dh-apparmor dh-systemd git libapparmor-dev libdevmapper-dev libltdl-dev libsqlite3-dev libseccomp-dev libsystemd-journal-dev --no-install-recommends && rm -rf /var/lib/apt/lists/*
+RUN apt-get update && apt-get install -y apparmor bash-completion btrfs-tools build-essential curl ca-certificates debhelper dh-apparmor dh-systemd git libapparmor-dev libaudit-dev libdevmapper-dev libltdl-dev libsqlite3-dev libseccomp-dev libsystemd-journal-dev --no-install-recommends && rm -rf /var/lib/apt/lists/*
 
 ENV SECCOMP_VERSION v2.2.3
 RUN buildDeps=' \
