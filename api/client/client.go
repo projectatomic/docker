@@ -10,7 +10,7 @@ import (
 	"github.com/docker/docker/api/client/lib"
 	"github.com/docker/docker/api/types"
 	"github.com/docker/docker/api/types/filters"
-	"github.com/docker/docker/api/types/registry"
+	"github.com/docker/docker/registry"
 	"github.com/docker/docker/runconfig"
 )
 
@@ -56,7 +56,7 @@ type apiClient interface {
 	ImagePull(options types.ImagePullOptions, privilegeFunc lib.RequestPrivilegeFunc) (io.ReadCloser, error)
 	ImagePush(options types.ImagePushOptions, privilegeFunc lib.RequestPrivilegeFunc) (io.ReadCloser, error)
 	ImageRemove(options types.ImageRemoveOptions) ([]types.ImageDelete, error)
-	ImageSearch(options types.ImageSearchOptions, privilegeFunc lib.RequestPrivilegeFunc) ([]registry.SearchResult, error)
+	ImageSearch(options types.ImageSearchOptions, privilegeFunc lib.RequestPrivilegeFunc) ([]registry.SearchResultExt, error)
 	ImageSave(imageIDs []string) (io.ReadCloser, error)
 	ImageTag(options types.ImageTagOptions) error
 	Info() (types.Info, error)
