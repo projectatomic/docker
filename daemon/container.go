@@ -271,6 +271,10 @@ func (container *Container) Start() (err error) {
 		return derr.ErrorCodeContainerBeingRemoved
 	}
 
+	if err := container.checkNoVolumes(); err != nil {
+		return err
+	}
+
 	// if we encounter an error during start we need to ensure that any other
 	// setup has been cleaned up properly
 	defer func() {

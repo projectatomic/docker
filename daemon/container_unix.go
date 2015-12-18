@@ -1594,3 +1594,28 @@ func (container *Container) ipcMounts() []execdriver.Mount {
 func detachMounted(path string) error {
 	return syscall.Unmount(path, syscall.MNT_DETACH)
 }
+
+func (container *Container) checkNoVolumes() error {
+	if container.daemon.configStore.NoVolumes {
+		// when --no-volumes is set do not allow volumes from images
+		if container.ImageID != "" { // not FROM scratch
+			img, err := container.daemon.GetImage(container.ImageID)
+			if err != nil {
+				return err
+			}
+			if len(img.Config.Volumes) > 0 {
+				return derr.ErrorCodeCantStart.WithArgs(container.ID, "volumes are not allowed")
+			}
+		}
+		// when --no-volumes is set do not allow container run with -v unless it's a bind
+		for _, m := range container.MountPoints {
+			if m.Driver != "" {
+				return derr.ErrorCodeCantStart.WithArgs(container.ID, "volumes are not allowed")
+			}
+		}
+		if len(container.hostConfig.VolumesFrom) > 0 {
+			return derr.ErrorCodeCantStart.WithArgs(container.ID, "volumes are not allowed")
+		}
+	}
+	return nil
+}

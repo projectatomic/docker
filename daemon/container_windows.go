@@ -208,3 +208,7 @@ func (container *Container) cleanupSecrets() {
 func (container *Container) setupSecretFiles() error {
 	return nil
 }
+
+func (container *Container) checkNoVolumes() error {
+	return nil
+}
