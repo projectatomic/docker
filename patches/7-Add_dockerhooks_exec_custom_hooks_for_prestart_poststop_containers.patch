@@ -1,0 +1,308 @@
+diff --git a/api/client/info.go b/api/client/info.go
+index 29e081d..bc25a66 100644
+--- a/api/client/info.go
++++ b/api/client/info.go
+@@ -4,6 +4,7 @@ import (
+ 	"fmt"
+ 
+ 	Cli "github.com/docker/docker/cli"
++	"github.com/docker/docker/daemon/execdriver/dockerhooks"
+ 	"github.com/docker/docker/pkg/ioutils"
+ 	flag "github.com/docker/docker/pkg/mflag"
+ 	"github.com/docker/go-units"
+@@ -57,6 +58,7 @@ func (cli *DockerCli) CmdInfo(args ...string) error {
+ 	ioutils.FprintfIfNotEmpty(cli.out, "Operating System: %s\n", info.OperatingSystem)
+ 	ioutils.FprintfIfNotEmpty(cli.out, "OSType: %s\n", info.OSType)
+ 	ioutils.FprintfIfNotEmpty(cli.out, "Architecture: %s\n", info.Architecture)
++	fmt.Fprintf(cli.out, "Number of Docker Hooks: %d\n", dockerhooks.TotalHooks())
+ 	fmt.Fprintf(cli.out, "CPUs: %d\n", info.NCPU)
+ 	fmt.Fprintf(cli.out, "Total Memory: %s\n", units.BytesSize(float64(info.MemTotal)))
+ 	ioutils.FprintfIfNotEmpty(cli.out, "Name: %s\n", info.Name)
+diff --git a/daemon/execdriver/dockerhooks/dockerhooks_unix.go b/daemon/execdriver/dockerhooks/dockerhooks_unix.go
+new file mode 100644
+index 0000000..fda37c6
+--- /dev/null
++++ b/daemon/execdriver/dockerhooks/dockerhooks_unix.go
+@@ -0,0 +1,90 @@
++// +build !windows
++
++package dockerhooks
++
++import (
++	"bytes"
++	"encoding/json"
++	"io/ioutil"
++	"os"
++	"os/exec"
++	"path"
++
++	"github.com/docker/docker/utils"
++	"github.com/opencontainers/runc/libcontainer/configs"
++)
++
++// Prestart function will be called after container process is created but
++// before it is started
++func Prestart(state configs.HookState, configPath string) error {
++	hooks, hookDirPath, err := getHooks()
++	if err != nil {
++		return err
++	}
++	b, err := json.Marshal(state)
++	if err != nil {
++		return err
++	}
++	for _, item := range hooks {
++		if item.Mode().IsRegular() {
++			if err := runHook(path.Join(hookDirPath, item.Name()), "prestart", configPath, b); err != nil {
++				return err
++			}
++		}
++	}
++	return nil
++}
++
++// Poststop function will be called after container process has stopped but
++// before it is removed
++func Poststop(state configs.HookState, configPath string) error {
++	hooks, hookDirPath, err := getHooks()
++	if err != nil {
++		return err
++	}
++	b, err := json.Marshal(state)
++	if err != nil {
++		return err
++	}
++	for i := len(hooks) - 1; i >= 0; i-- {
++		fn := hooks[i].Name()
++		for _, item := range hooks {
++			if item.Mode().IsRegular() && fn == item.Name() {
++				if err := runHook(path.Join(hookDirPath, item.Name()), "poststop", configPath, b); err != nil {
++					return err
++				}
++			}
++		}
++	}
++	return nil
++}
++
++// TotalHooks returns the number of hooks to be used
++func TotalHooks() int {
++	hooks, _, _ := getHooks()
++	return len(hooks)
++}
++
++func getHooks() ([]os.FileInfo, string, error) {
++
++	hookDirPath := path.Join(path.Dir(utils.DockerInitPath("")), "hooks.d")
++	// find any hooks executables
++	if _, err := os.Stat(hookDirPath); os.IsNotExist(err) {
++		return nil, "", nil
++	}
++
++	hooks, err := ioutil.ReadDir(hookDirPath)
++	return hooks, hookDirPath, err
++}
++
++func runHook(hookFilePath string, hookType string, configPath string, stdinBytes []byte) error {
++	cmd := exec.Cmd{
++		Path: hookFilePath,
++		Args: []string{hookFilePath, hookType, configPath},
++		Env: []string{
++			"container=docker",
++		},
++		Stdin: bytes.NewReader(stdinBytes),
++	}
++	return cmd.Run()
++}
+diff --git a/daemon/execdriver/dockerhooks/dockerhooks_windows.go b/daemon/execdriver/dockerhooks/dockerhooks_windows.go
+new file mode 100644
+index 0000000..2061d94
+--- /dev/null
++++ b/daemon/execdriver/dockerhooks/dockerhooks_windows.go
+@@ -0,0 +1,22 @@
++package dockerhooks
++
++import (
++	"github.com/opencontainers/runc/libcontainer/configs"
++)
++
++// Prestart function will be called after container process is created but
++// before it is started
++func Prestart(state configs.HookState, configPath string) error {
++	return nil
++}
++
++// Poststop function will be called after container process has stopped but
++// before it is removed
++func Poststop(state configs.HookState, configPath string) error {
++	return nil
++}
++
++// TotalHooks returns the number of hooks to be used
++func TotalHooks() int {
++	return 0
++}
+diff --git a/daemon/execdriver/driver.go b/daemon/execdriver/driver.go
+index cb4ba62..d8ce774 100644
+--- a/daemon/execdriver/driver.go
++++ b/daemon/execdriver/driver.go
+@@ -126,16 +126,17 @@ type CommonProcessConfig struct {
+ // CommonCommand is the common platform agnostic part of the Command structure
+ // which wraps an os/exec.Cmd to add more metadata
+ type CommonCommand struct {
+-	ContainerPid  int           `json:"container_pid"` // the pid for the process inside a container
+-	ID            string        `json:"id"`
+-	InitPath      string        `json:"initpath"`    // dockerinit
+-	MountLabel    string        `json:"mount_label"` // TODO Windows. More involved, but can be factored out
+-	Mounts        []Mount       `json:"mounts"`
+-	Network       *Network      `json:"network"`
+-	ProcessConfig ProcessConfig `json:"process_config"` // Describes the init process of the container.
+-	ProcessLabel  string        `json:"process_label"`  // TODO Windows. More involved, but can be factored out
+-	Resources     *Resources    `json:"resources"`
+-	Rootfs        string        `json:"rootfs"` // root fs of the container
+-	WorkingDir    string        `json:"working_dir"`
+-	TmpDir        string        `json:"tmpdir"` // Directory used to store docker tmpdirs.
++	ContainerPid      int           `json:"container_pid"` // the pid for the process inside a container
++	ID                string        `json:"id"`
++	InitPath          string        `json:"initpath"`    // dockerinit
++	MountLabel        string        `json:"mount_label"` // TODO Windows. More involved, but can be factored out
++	Mounts            []Mount       `json:"mounts"`
++	Network           *Network      `json:"network"`
++	ProcessConfig     ProcessConfig `json:"process_config"` // Describes the init process of the container.
++	ProcessLabel      string        `json:"process_label"`  // TODO Windows. More involved, but can be factored out
++	Resources         *Resources    `json:"resources"`
++	Rootfs            string        `json:"rootfs"` // root fs of the container
++	WorkingDir        string        `json:"working_dir"`
++	TmpDir            string        `json:"tmpdir"` // Directory used to store docker tmpdirs.
++	ContainerJSONPath string        `json:"-"`
+ }
+diff --git a/daemon/execdriver/native/create.go b/daemon/execdriver/native/create.go
+index 0154801..9643ce3 100644
+--- a/daemon/execdriver/native/create.go
++++ b/daemon/execdriver/native/create.go
+@@ -9,6 +9,7 @@ import (
+ 	"syscall"
+ 
+ 	"github.com/docker/docker/daemon/execdriver"
++	"github.com/docker/docker/daemon/execdriver/dockerhooks"
+ 	derr "github.com/docker/docker/errors"
+ 	"github.com/docker/docker/pkg/mount"
+ 
+@@ -16,6 +17,8 @@ import (
+ 	"github.com/opencontainers/runc/libcontainer/apparmor"
+ 	"github.com/opencontainers/runc/libcontainer/configs"
+ 	"github.com/opencontainers/runc/libcontainer/devices"
++
++	"github.com/Sirupsen/logrus"
+ )
+ 
+ // createContainer populates and configures the container type with the
+@@ -143,26 +146,38 @@ func (d *Driver) createNetwork(container *configs.Config, c *execdriver.Command,
+ 		container.Namespaces.Add(configs.NEWNET, c.Network.NamespacePath)
+ 		return nil
+ 	}
++
++	logrus.Infof("Config: %+v", c)
++
++	container.Hooks = &configs.Hooks{}
++	container.Hooks.Prestart = append(container.Hooks.Prestart,
++		configs.NewFunctionHook(func(s configs.HookState) error {
++			return dockerhooks.Prestart(s, c.ContainerJSONPath)
++		}),
++	)
++	container.Hooks.Poststop = append(container.Hooks.Poststop,
++		configs.NewFunctionHook(func(s configs.HookState) error {
++			return dockerhooks.Poststop(s, c.ContainerJSONPath)
++		}),
++	)
++
+ 	// only set up prestart hook if the namespace path is not set (this should be
+ 	// all cases *except* for --net=host shared networking)
+-	container.Hooks = &configs.Hooks{
+-		Prestart: []configs.Hook{
+-			configs.NewFunctionHook(func(s configs.HookState) error {
+-				if len(hooks.PreStart) > 0 {
+-					for _, fnHook := range hooks.PreStart {
+-						// A closed channel for OOM is returned here as it will be
+-						// non-blocking and return the correct result when read.
+-						chOOM := make(chan struct{})
+-						close(chOOM)
+-						if err := fnHook(&c.ProcessConfig, s.Pid, chOOM); err != nil {
+-							return err
+-						}
++	container.Hooks.Prestart = append(container.Hooks.Prestart,
++		configs.NewFunctionHook(func(s configs.HookState) error {
++			if len(hooks.PreStart) > 0 {
++				for _, fnHook := range hooks.PreStart {
++					// A closed channel for OOM is returned here as it will be
++					// non-blocking and return the correct result when read.
++					chOOM := make(chan struct{})
++					close(chOOM)
++					if err := fnHook(&c.ProcessConfig, s.Pid, chOOM); err != nil {
++						return err
+ 					}
+ 				}
+-				return nil
+-			}),
+-		},
+-	}
++			}
++			return nil
++		}))
+ 	return nil
+ }
+ 
+diff --git a/daemon/start.go b/daemon/start.go
+index 90b745e..6b2c739 100644
+--- a/daemon/start.go
++++ b/daemon/start.go
+@@ -132,6 +132,13 @@ func (daemon *Daemon) containerStart(container *container.Container) (err error)
+ 	mounts = append(mounts, container.TmpfsMounts()...)
+ 
+ 	container.Command.Mounts = mounts
++
++	jsonPath, err := container.ConfigPath()
++	if err != nil {
++		return err
++	}
++	container.Command.ContainerJSONPath = jsonPath
++
+ 	if err := daemon.waitForStart(container); err != nil {
+ 		return err
+ 	}
+diff --git a/docs/reference/commandline/info.md b/docs/reference/commandline/info.md
+index f489a9b..1fba9e8 100644
+--- a/docs/reference/commandline/info.md
++++ b/docs/reference/commandline/info.md
+@@ -37,6 +37,7 @@ For example:
+     OSType: linux
+     Architecture: x86_64
+     Operating System: Ubuntu 15.04
++    Number of Hooks: 2
+     CPUs: 24
+     Total Memory: 62.86 GiB
+     Name: docker
+diff --git a/docs/userguide/labels-custom-metadata.md b/docs/userguide/labels-custom-metadata.md
+index e4ac7c4..c31aa21 100644
+--- a/docs/userguide/labels-custom-metadata.md
++++ b/docs/userguide/labels-custom-metadata.md
+@@ -198,6 +198,7 @@ These labels appear as part of the `docker info` output for the daemon:
+     Logging Driver: json-file
+     Kernel Version: 3.19.0-22-generic
+     Operating System: Ubuntu 15.04
++    Number of Hooks: 2
+     CPUs: 24
+     Total Memory: 62.86 GiB
+     Name: docker
+diff --git a/man/docker-info.1.md b/man/docker-info.1.md
+index ae04e49..eeb90ae 100644
+--- a/man/docker-info.1.md
++++ b/man/docker-info.1.md
+@@ -46,6 +46,7 @@ Here is a sample output:
+     Operating System: Ubuntu 14.04 LTS
+     OSType: linux
+     Architecture: x86_64
++    Number of Hooks: 2
+     CPUs: 1
+     Total Memory: 2 GiB
+ 

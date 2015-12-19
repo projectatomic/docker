@@ -1,0 +1,48 @@
+Allow for remote repository inspection
+
+**Inspect remote images**
+
+Extended server API to allow for inspection of remote images. If a short
+name is given, list of additional registries will be queried until a
+repository is found. This allows for remote inspection without
+downloading image layers.
+
+The URL is following:
+
+    /<apiVersion>/images/<repoName>/json?remote=1
+
+The output is the same json as for local images. However, it excludes
+few attributes specific only to local images:
+
+- GraphDriver
+- VirtualSize
+
+And it adds some additional attributes:
+
+- Digest
+- Tag
+- Registry
+
+**List tags of remote repository**
+
+Extended server API to allow for listing of remote repositories.
+
+The URL is following:
+
+    /<apiVersion>/images/<repoName>/tags?remote=1
+
+If a short name is given, list of additional registries will be queried
+until a repository is found.
+
+Returned is a json in following format:
+
+    { "Name"    : "<repoName>"
+    , "TagList" : [ {"<tag1>" : "<ID1>", "<tag2>" : <ID2>" } ]
+    }
+
+Quirks and TODOs:
+ - By default V1 registry enpoints are queried because they provide tags
+   with associated image IDs. If not available, V2 endpoint will be
+   tried. In such a case the output will lack image IDs though.
+
+Signed-off-by: Michal Minar <miminar@redhat.com>

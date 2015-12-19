@@ -1,0 +1,364 @@
+diff --git a/Dockerfile b/Dockerfile
+index 1a503a7..91e3888 100644
+--- a/Dockerfile
++++ b/Dockerfile
+@@ -52,6 +52,7 @@ RUN apt-get update && apt-get install -y \
+ 	iptables \
+ 	jq \
+ 	libapparmor-dev \
++	libaudit-dev \
+ 	libcap-dev \
+ 	libltdl-dev \
+ 	libsqlite3-dev \
+diff --git a/api/server/credentials_linux.go b/api/server/credentials_linux.go
+index 583aa1a..db8c4d8 100644
+--- a/api/server/credentials_linux.go
++++ b/api/server/credentials_linux.go
+@@ -17,6 +17,7 @@ import (
+ 	"github.com/Sirupsen/logrus"
+ 	"github.com/docker/docker/api/types/versions/v1p20"
+ 	"github.com/docker/docker/container"
++	"github.com/docker/docker/pkg/audit"
+ 	"github.com/docker/docker/pkg/version"
+ )
+ 
+@@ -248,6 +249,54 @@ func (s *Server) LogAction(w http.ResponseWriter, r *http.Request) error {
+ 		fallthrough
+ 	default:
+ 		logrus.Info(message)
++		logAuditlog(c, action, username, loginuid, true)
+ 	}
+ 	return nil
+ }
++
++//Logs an API event to the audit log
++func logAuditlog(c *container.Container, action string, username string, loginuid int, success bool) {
++	virt := audit.AuditVirtControl
++	vm := "?"
++	vmPid := "?"
++	exe := "?"
++	hostname := "?"
++	user := "?"
++	auid := "?"
++
++	if c != nil {
++		vm = c.Config.Image
++		vmPid = fmt.Sprint(c.State.Pid)
++		exe = c.Path
++		hostname = c.Config.Hostname
++	}
++
++	if username != "" {
++		user = username
++	}
++
++	if loginuid != -1 {
++		auid = fmt.Sprint(loginuid)
++	}
++
++	vars := map[string]string{
++		"op":       action,
++		"reason":   "api",
++		"vm":       vm,
++		"vm-pid":   vmPid,
++		"user":     user,
++		"auid":     auid,
++		"exe":      exe,
++		"hostname": hostname,
++	}
++
++	//Encoding is a function of libaudit that ensures
++	//that the audit values contain only approved characters.
++	for key, value := range vars {
++		if audit.ValueNeedsEncoding(value) {
++			vars[key] = audit.EncodeNVString(key, value)
++		}
++	}
++	message := audit.FormatVars(vars)
++	audit.LogUserEvent(virt, message, success)
++}
+diff --git a/contrib/builder/deb/debian-jessie/Dockerfile b/contrib/builder/deb/debian-jessie/Dockerfile
+index 5ce3989..f330ba2 100644
+--- a/contrib/builder/deb/debian-jessie/Dockerfile
++++ b/contrib/builder/deb/debian-jessie/Dockerfile
+@@ -4,7 +4,7 @@
+ 
+ FROM debian:jessie
+ 
+-RUN apt-get update && apt-get install -y apparmor bash-completion btrfs-tools build-essential curl ca-certificates debhelper dh-apparmor dh-systemd git libapparmor-dev libdevmapper-dev libltdl-dev libsqlite3-dev libseccomp-dev libsystemd-journal-dev --no-install-recommends && rm -rf /var/lib/apt/lists/*
++RUN apt-get update && apt-get install -y apparmor bash-completion btrfs-tools build-essential curl ca-certificates debhelper dh-apparmor dh-systemd git libapparmor-dev libaudit-dev libdevmapper-dev libltdl-dev libsqlite3-dev libseccomp-dev libsystemd-journal-dev --no-install-recommends && rm -rf /var/lib/apt/lists/*
+ 
+ ENV SECCOMP_VERSION v2.2.3
+ RUN buildDeps=' \
+diff --git a/contrib/builder/deb/debian-stretch/Dockerfile b/contrib/builder/deb/debian-stretch/Dockerfile
+index efc9e00..150e1d0 100644
+--- a/contrib/builder/deb/debian-stretch/Dockerfile
++++ b/contrib/builder/deb/debian-stretch/Dockerfile
+@@ -4,7 +4,7 @@
+ 
+ FROM debian:stretch
+ 
+-RUN apt-get update && apt-get install -y apparmor bash-completion btrfs-tools build-essential curl ca-certificates debhelper dh-apparmor dh-systemd git libapparmor-dev libdevmapper-dev libltdl-dev libsqlite3-dev libseccomp-dev libsystemd-dev --no-install-recommends && rm -rf /var/lib/apt/lists/*
++RUN apt-get update && apt-get install -y apparmor bash-completion btrfs-tools build-essential curl ca-certificates debhelper dh-apparmor dh-systemd git libapparmor-dev libaudit-dev libdevmapper-dev libltdl-dev libsqlite3-dev libseccomp-dev libsystemd-dev --no-install-recommends && rm -rf /var/lib/apt/lists/*
+ 
+ ENV GO_VERSION 1.5.2
+ RUN curl -fSL "https://storage.googleapis.com/golang/go${GO_VERSION}.linux-amd64.tar.gz" | tar xzC /usr/local
+diff --git a/contrib/builder/deb/debian-wheezy/Dockerfile b/contrib/builder/deb/debian-wheezy/Dockerfile
+index 67d6d43..8ffae0c 100644
+--- a/contrib/builder/deb/debian-wheezy/Dockerfile
++++ b/contrib/builder/deb/debian-wheezy/Dockerfile
+@@ -4,7 +4,7 @@
+ 
+ FROM debian:wheezy-backports
+ 
+-RUN apt-get update && apt-get install -y apparmor bash-completion btrfs-tools/wheezy-backports build-essential curl ca-certificates debhelper dh-apparmor dh-systemd git libapparmor-dev libdevmapper-dev libltdl-dev libsqlite3-dev  libsystemd-journal-dev --no-install-recommends && rm -rf /var/lib/apt/lists/*
++RUN apt-get update && apt-get install -y apparmor bash-completion btrfs-tools/wheezy-backports build-essential curl ca-certificates debhelper dh-apparmor dh-systemd git libapparmor-dev libaudit-dev libdevmapper-dev libltdl-dev libsqlite3-dev  libsystemd-journal-dev --no-install-recommends && rm -rf /var/lib/apt/lists/*
+ 
+ ENV GO_VERSION 1.5.2
+ RUN curl -fSL "https://storage.googleapis.com/golang/go${GO_VERSION}.linux-amd64.tar.gz" | tar xzC /usr/local
+diff --git a/contrib/builder/deb/generate.sh b/contrib/builder/deb/generate.sh
+index 18d0752..2fe0e9e 100755
+--- a/contrib/builder/deb/generate.sh
++++ b/contrib/builder/deb/generate.sh
+@@ -55,6 +55,7 @@ for version in "${versions[@]}"; do
+ 		dh-systemd # for systemd debhelper integration
+ 		git # for "git commit" info in "docker -v"
+ 		libapparmor-dev # for "sys/apparmor.h"
++		libaudit-dev # for "libaudit.h" and libaudit.so
+ 		libdevmapper-dev # for "libdevmapper.h"
+ 		libltdl-dev # for pkcs11 "ltdl.h"
+ 		libsqlite3-dev # for "sqlite3.h"
+diff --git a/contrib/builder/deb/ubuntu-precise/Dockerfile b/contrib/builder/deb/ubuntu-precise/Dockerfile
+index daf7668..bba2a42 100644
+--- a/contrib/builder/deb/ubuntu-precise/Dockerfile
++++ b/contrib/builder/deb/ubuntu-precise/Dockerfile
+@@ -4,7 +4,7 @@
+ 
+ FROM ubuntu:precise
+ 
+-RUN apt-get update && apt-get install -y apparmor bash-completion  build-essential curl ca-certificates debhelper dh-apparmor  git libapparmor-dev  libltdl-dev libsqlite3-dev  --no-install-recommends && rm -rf /var/lib/apt/lists/*
++RUN apt-get update && apt-get install -y apparmor bash-completion  build-essential curl ca-certificates debhelper dh-apparmor  git libapparmor-dev  libaudit-dev libltdl-dev libsqlite3-dev  --no-install-recommends && rm -rf /var/lib/apt/lists/*
+ 
+ ENV GO_VERSION 1.5.2
+ RUN curl -fSL "https://storage.googleapis.com/golang/go${GO_VERSION}.linux-amd64.tar.gz" | tar xzC /usr/local
+diff --git a/contrib/builder/deb/ubuntu-trusty/Dockerfile b/contrib/builder/deb/ubuntu-trusty/Dockerfile
+index ae6ef44..2fbef0d 100644
+--- a/contrib/builder/deb/ubuntu-trusty/Dockerfile
++++ b/contrib/builder/deb/ubuntu-trusty/Dockerfile
+@@ -4,7 +4,7 @@
+ 
+ FROM ubuntu:trusty
+ 
+-RUN apt-get update && apt-get install -y apparmor bash-completion btrfs-tools build-essential curl ca-certificates debhelper dh-apparmor dh-systemd git libapparmor-dev libdevmapper-dev libltdl-dev libsqlite3-dev libseccomp-dev libsystemd-journal-dev --no-install-recommends && rm -rf /var/lib/apt/lists/*
++RUN apt-get update && apt-get install -y apparmor bash-completion btrfs-tools build-essential curl ca-certificates debhelper dh-apparmor dh-systemd git libapparmor-dev libaudit-dev libdevmapper-dev libltdl-dev libsqlite3-dev libseccomp-dev libsystemd-journal-dev --no-install-recommends && rm -rf /var/lib/apt/lists/*
+ 
+ ENV SECCOMP_VERSION v2.2.3
+ RUN buildDeps=' \
+diff --git a/contrib/builder/deb/ubuntu-vivid/Dockerfile b/contrib/builder/deb/ubuntu-vivid/Dockerfile
+index fd8d029..f228a52 100644
+--- a/contrib/builder/deb/ubuntu-vivid/Dockerfile
++++ b/contrib/builder/deb/ubuntu-vivid/Dockerfile
+@@ -4,7 +4,7 @@
+ 
+ FROM ubuntu:vivid
+ 
+-RUN apt-get update && apt-get install -y apparmor bash-completion btrfs-tools build-essential curl ca-certificates debhelper dh-apparmor dh-systemd git libapparmor-dev libdevmapper-dev libltdl-dev libsqlite3-dev libseccomp-dev libsystemd-journal-dev --no-install-recommends && rm -rf /var/lib/apt/lists/*
++RUN apt-get update && apt-get install -y apparmor bash-completion btrfs-tools build-essential curl ca-certificates debhelper dh-apparmor dh-systemd git libapparmor-dev libaudit-dev libdevmapper-dev libltdl-dev libsqlite3-dev libseccomp-dev libsystemd-journal-dev --no-install-recommends && rm -rf /var/lib/apt/lists/*
+ 
+ ENV SECCOMP_VERSION v2.2.3
+ RUN buildDeps=' \
+diff --git a/contrib/builder/deb/ubuntu-wily/Dockerfile b/contrib/builder/deb/ubuntu-wily/Dockerfile
+index 9414832..9c0033a 100644
+--- a/contrib/builder/deb/ubuntu-wily/Dockerfile
++++ b/contrib/builder/deb/ubuntu-wily/Dockerfile
+@@ -4,7 +4,7 @@
+ 
+ FROM ubuntu:wily
+ 
+-RUN apt-get update && apt-get install -y apparmor bash-completion btrfs-tools build-essential curl ca-certificates debhelper dh-apparmor dh-systemd git libapparmor-dev libdevmapper-dev libltdl-dev libsqlite3-dev libseccomp-dev libsystemd-dev --no-install-recommends && rm -rf /var/lib/apt/lists/*
++RUN apt-get update && apt-get install -y apparmor bash-completion btrfs-tools build-essential curl ca-certificates debhelper dh-apparmor dh-systemd git libapparmor-dev libaudit-dev libdevmapper-dev libltdl-dev libsqlite3-dev libseccomp-dev libsystemd-dev --no-install-recommends && rm -rf /var/lib/apt/lists/*
+ 
+ ENV GO_VERSION 1.5.2
+ RUN curl -fSL "https://storage.googleapis.com/golang/go${GO_VERSION}.linux-amd64.tar.gz" | tar xzC /usr/local
+diff --git a/contrib/builder/rpm/centos-7/Dockerfile b/contrib/builder/rpm/centos-7/Dockerfile
+index 0a1fdde..0cc92a6 100644
+--- a/contrib/builder/rpm/centos-7/Dockerfile
++++ b/contrib/builder/rpm/centos-7/Dockerfile
+@@ -6,7 +6,7 @@ FROM centos:7
+ 
+ RUN yum groupinstall -y "Development Tools"
+ RUN yum -y swap -- remove systemd-container systemd-container-libs -- install systemd systemd-libs
+-RUN yum install -y btrfs-progs-devel device-mapper-devel glibc-static libseccomp-devel libselinux-devel libtool-ltdl-devel selinux-policy selinux-policy-devel sqlite-devel tar
++RUN yum install -y btrfs-progs-devel device-mapper-devel glibc-static libaudit-dev libseccomp-devel libselinux-devel libtool-ltdl-devel selinux-policy selinux-policy-devel sqlite-devel tar
+ 
+ ENV SECCOMP_VERSION v2.2.3
+ RUN buildDeps=' \
+diff --git a/contrib/builder/rpm/fedora-21/Dockerfile b/contrib/builder/rpm/fedora-21/Dockerfile
+index a392a2f..daba5e1 100644
+--- a/contrib/builder/rpm/fedora-21/Dockerfile
++++ b/contrib/builder/rpm/fedora-21/Dockerfile
+@@ -5,7 +5,7 @@
+ FROM fedora:21
+ 
+ RUN yum install -y @development-tools fedora-packager
+-RUN yum install -y btrfs-progs-devel device-mapper-devel glibc-static libseccomp-devel libselinux-devel libtool-ltdl-devel selinux-policy selinux-policy-devel sqlite-devel tar
++RUN yum install -y btrfs-progs-devel device-mapper-devel glibc-static libaudit-dev libseccomp-devel libselinux-devel libtool-ltdl-devel selinux-policy selinux-policy-devel sqlite-devel tar
+ 
+ ENV SECCOMP_VERSION v2.2.3
+ RUN buildDeps=' \
+diff --git a/contrib/builder/rpm/fedora-22/Dockerfile b/contrib/builder/rpm/fedora-22/Dockerfile
+index ff88ce1..425452b 100644
+--- a/contrib/builder/rpm/fedora-22/Dockerfile
++++ b/contrib/builder/rpm/fedora-22/Dockerfile
+@@ -5,7 +5,7 @@
+ FROM fedora:22
+ 
+ RUN dnf install -y @development-tools fedora-packager
+-RUN dnf install -y btrfs-progs-devel device-mapper-devel glibc-static libseccomp-devel libselinux-devel libtool-ltdl-devel selinux-policy selinux-policy-devel sqlite-devel tar
++RUN dnf install -y btrfs-progs-devel device-mapper-devel glibc-static libaudit-dev libseccomp-devel libselinux-devel libtool-ltdl-devel selinux-policy selinux-policy-devel sqlite-devel tar
+ 
+ ENV SECCOMP_VERSION v2.2.3
+ RUN buildDeps=' \
+diff --git a/contrib/builder/rpm/fedora-23/Dockerfile b/contrib/builder/rpm/fedora-23/Dockerfile
+index 1596714..4f334a9 100644
+--- a/contrib/builder/rpm/fedora-23/Dockerfile
++++ b/contrib/builder/rpm/fedora-23/Dockerfile
+@@ -5,7 +5,7 @@
+ FROM fedora:23
+ 
+ RUN dnf install -y @development-tools fedora-packager
+-RUN dnf install -y btrfs-progs-devel device-mapper-devel glibc-static libseccomp-devel libselinux-devel libtool-ltdl-devel selinux-policy selinux-policy-devel sqlite-devel tar
++RUN dnf install -y btrfs-progs-devel device-mapper-devel glibc-static libaudit-dev libseccomp-devel libselinux-devel libtool-ltdl-devel selinux-policy selinux-policy-devel sqlite-devel tar
+ 
+ ENV SECCOMP_VERSION v2.2.3
+ RUN buildDeps=' \
+diff --git a/contrib/builder/rpm/generate.sh b/contrib/builder/rpm/generate.sh
+index 18ba550..38c5e9b 100755
+--- a/contrib/builder/rpm/generate.sh
++++ b/contrib/builder/rpm/generate.sh
+@@ -64,6 +64,7 @@ for version in "${versions[@]}"; do
+ 
+ 	# this list is sorted alphabetically; please keep it that way
+ 	packages=(
++		audit-libs-devel audit-libs-static # for "libaudit.h" and libaudit.so/libaudit.a
+ 		btrfs-progs-devel # for "btrfs/ioctl.h" (and "version.h" if possible)
+ 		device-mapper-devel # for "libdevmapper.h"
+ 		glibc-static
+diff --git a/contrib/builder/rpm/opensuse-13.2/Dockerfile b/contrib/builder/rpm/opensuse-13.2/Dockerfile
+index 2c4e7c6..5cb62d8 100644
+--- a/contrib/builder/rpm/opensuse-13.2/Dockerfile
++++ b/contrib/builder/rpm/opensuse-13.2/Dockerfile
+@@ -5,7 +5,7 @@
+ FROM opensuse:13.2
+ 
+ RUN zypper --non-interactive install ca-certificates* curl gzip rpm-build
+-RUN zypper --non-interactive install libbtrfs-devel device-mapper-devel glibc-static  libselinux-devel libtool-ltdl-devel selinux-policy selinux-policy-devel sqlite-devel tar
++RUN zypper --non-interactive install libaudit-dev libbtrfs-devel device-mapper-devel glibc-static  libselinux-devel libtool-ltdl-devel selinux-policy selinux-policy-devel sqlite-devel tar
+ 
+ ENV GO_VERSION 1.5.2
+ RUN curl -fSL "https://storage.googleapis.com/golang/go${GO_VERSION}.linux-amd64.tar.gz" | tar xzC /usr/local
+diff --git a/contrib/builder/rpm/oraclelinux-7/Dockerfile b/contrib/builder/rpm/oraclelinux-7/Dockerfile
+index 3d6a6b3..8d8cd23 100644
+--- a/contrib/builder/rpm/oraclelinux-7/Dockerfile
++++ b/contrib/builder/rpm/oraclelinux-7/Dockerfile
+@@ -5,7 +5,7 @@
+ FROM oraclelinux:7
+ 
+ RUN yum groupinstall -y "Development Tools"
+-RUN yum install -y --enablerepo=ol7_optional_latest btrfs-progs-devel device-mapper-devel glibc-static libseccomp-devel libselinux-devel libtool-ltdl-devel selinux-policy selinux-policy-devel sqlite-devel tar
++RUN yum install -y --enablerepo=ol7_optional_latest btrfs-progs-devel device-mapper-devel glibc-static libaudit-dev libseccomp-devel libselinux-devel libtool-ltdl-devel selinux-policy selinux-policy-devel sqlite-devel tar
+ 
+ ENV SECCOMP_VERSION v2.2.3
+ RUN buildDeps=' \
+diff --git a/pkg/audit/audit_linux.go b/pkg/audit/audit_linux.go
+new file mode 100644
+index 0000000..1409fec
+--- /dev/null
++++ b/pkg/audit/audit_linux.go
+@@ -0,0 +1,86 @@
++// +build linux
++
++/*
++  The audit package is a go bindings to libaudit that only allows for
++  logging audit events.
++
++  Author Steve Grubb <sgrubb@redhat.com>
++*/
++
++package audit
++
++// #cgo LDFLAGS: -laudit
++// #include "libaudit.h"
++// #include <unistd.h>
++// #include <stdlib.h>
++// #include <string.h>
++// #include <stdio.h>
++import "C"
++
++import (
++	"fmt"
++	"unsafe"
++)
++
++// viraudit.c: auditing support
++// AUDIT_VIRT_CONTROL, AUDIT_VIRT_RESOURCE, AUDIT_VIRT_MACHINE_ID
++const (
++	AuditVirtControl = 2500
++	VirtResource     = 2501
++	VirtMachineID    = 2502
++)
++
++// ValueNeedsEncoding returns true if audit value needs encoding
++func ValueNeedsEncoding(str string) bool {
++	cstr := C.CString(str)
++	defer C.free(unsafe.Pointer(cstr))
++	len := C.strlen(cstr)
++
++	res, _ := C.audit_value_needs_encoding(cstr, C.uint(len))
++	if res != 0 {
++		return true
++	}
++	return false
++}
++
++// EncodeNVString returns string of encoded audit value
++func EncodeNVString(name string, value string) string {
++	cname := C.CString(name)
++	cval := C.CString(value)
++
++	cres := C.audit_encode_nv_string(cname, cval, 0)
++
++	C.free(unsafe.Pointer(cname))
++	C.free(unsafe.Pointer(cval))
++	defer C.free(unsafe.Pointer(cres))
++
++	return C.GoString(cres)
++}
++
++// LogUserEvent logs a generate user message
++func LogUserEvent(eventType int, message string, result bool) error {
++	var r int
++	fd := C.audit_open()
++	defer C.close(fd)
++	if result {
++		r = 1
++	} else {
++		r = 0
++	}
++	if fd > 0 {
++		cmsg := C.CString(message)
++		defer C.free(unsafe.Pointer(cmsg))
++		_, err := C.audit_log_user_message(fd, C.int(eventType), cmsg, nil, nil, nil, C.int(r))
++		return err
++	}
++	return nil
++}
++
++// FormatVars formats map to a space separated list of Key=Value pairs
++func FormatVars(vars map[string]string) string {
++	var result string
++	for key, value := range vars {
++		result += fmt.Sprintf("%s=%s ", key, value)
++	}
++	return result
++}
