@@ -1,0 +1,36 @@
+Improved searching experience
+
+- Prepend indicies to search results.
+- Prefix remote name with registry name.
+- Shorten index name if it's not an ip address.
+- Added `--no-index` option to avoid listing the index name.
+- Changed sorting of entries when index is preserved:
+
+  1. sort by `index_name`
+  2. sort by `star_count`
+  3. sort by `registry_name`
+  4. sort by `name`
+  5. sort by `description`
+
+- Changed sorting of entries when index is omitted:
+
+  1. sort by `registry_name`
+  2. sort by `star_count`
+  3. sort by `name`
+  4. sort by `description`
+
+Example (with just first two columns left):
+
+    $ sudo docker search mongo
+    INDEX       NAME                                                     DESCRIPTION
+    docker.io   docker.io/mongo                                          MongoDB docu...
+    [...]
+    myregistry  docker.io/mongo                                          test
+    [...]
+    redhat.com  docker-registry.usersys.redhat.com/goldmann/eap-mongodb
+    [...]
+
+Docker-DCO-1.1-Signed-off-by: Daniel Riek <riek@redhat.com>
+Signed-off-by: Michal Minar <miminar@redhat.com>
+
+Signed-off-by: Dan Walsh <dwalsh@redhat.com>

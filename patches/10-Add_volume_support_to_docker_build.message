@@ -1,0 +1,14 @@
+Add volume support to docker build
+
+This patch adds the ability to add bind mounts at build-time.
+This will be helpful in supporting builds with host files and secrets.
+The `--volume|-v` flag is added for this purpose. Trying to define a
+volume (ala `docker run`) errors out. Each bind mounts' mode will be
+read-only and it will preserve any SELinux label which was defined via
+the cli (`:[z,Z]`). Defining a read-write mode (`:rw`) will just print
+a warning in the build output and the actual mode will be changed to
+read-only.
+
+Signed-off-by: Antonio Murdaca <runcom@redhat.com>
+
+Signed-off-by: Dan Walsh <dwalsh@redhat.com>
