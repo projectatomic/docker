@@ -1,0 +1,44 @@
+Add --add-registry and --block-registry options to docker daemon
+
+The first option allows to prepend additional registries to a public
+one. These will be queried one after another - in the same order they
+were given - when pulling images.
+
+For example:
+
+    --add-registry=foo.com
+    --add-registry=bar.com
+
+Would cause a
+
+    docker pull myapp
+
+to search
+
+    foo.com/myapp
+    bar.com/myapp
+    docker.io/myapp
+
+The second option builds a list of banned registries. Docker daemon will
+prevent user from any communication with such registries. This option
+recognizes a special keyword "public" denoting public Docker registry.
+
+So for example adding `--block-registry=public` to daemon flags of
+previous example would result in searching the same registries except
+for `docker.io/myapp`.
+
+Both flags are marked as experimental in man pages.
+
+This would allow companies and vendors to specify registries which
+contain content that the companies will not allowed to be stored at
+docker.io.
+
+The same applies to `FROM` statement in Dockerfile when issuing a build.
+
+This patch also causes all pulled repositories to be fully qualified -
+including those coming from the public registry.
+
+Docker-DCO-1.1-Signed-off-by: Dan Walsh <dwalsh@redhat.com> (github: rhatdan)
+Signed-off-by: Michal Minar <miminar@redhat.com>
+
+Signed-off-by: Dan Walsh <dwalsh@redhat.com>

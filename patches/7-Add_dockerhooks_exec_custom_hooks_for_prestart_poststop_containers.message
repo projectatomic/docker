@@ -1,0 +1,28 @@
+Add dockerhooks exec custom hooks for prestart/poststop containers
+
+With the addition of runc/hooks support we want to add a feature
+to allow third parties to run helper programs before a docker container
+gets started and just after the container finishes.
+
+For example we want to add a RegisterMachine hook.
+
+For systems that support systemd/RegisterMachine, this hook would register
+a machine to the machinectl.  machinectl could then list docker containers
+along with other virtulization environments like kvm, and systemd-nspawn
+containers. Overtime we would want to implement other machinectl features
+to get docker containers better integrated into the system and machinectl.
+
+Another example of a dockerhook might be for people wanting to do better logging
+of starting and stopping of containers.  For example have a log agent that
+records when a container starts and stops and then sends a message to a
+monitoring station.
+
+Dockerhooks reads directory in either /usr/lib/docker/hooks.d or
+/usr/libexec/docker/hooks.d to search for hooks, if the directory exists
+docker will execute the executables in this directory via runc/libcontainer i
+using PreStart and PostStop.  It will also send the config.json file as the
+second paramater.
+
+Signed-off-by: Sally O'Malley <somalley@redhat.com>
+Signed-off-by: Mrunal Patel <mrunalp@gmail.com>
+Signed-off-by: Dan Walsh <dwalsh@redhat.com>
