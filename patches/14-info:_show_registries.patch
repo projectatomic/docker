@@ -1,0 +1,133 @@
+diff --git a/api/client/info.go b/api/client/info.go
+index bc25a66..c1dab74 100644
+--- a/api/client/info.go
++++ b/api/client/info.go
+@@ -2,6 +2,7 @@ package client
+ 
+ import (
+ 	"fmt"
++	"strings"
+ 
+ 	Cli "github.com/docker/docker/cli"
+ 	"github.com/docker/docker/daemon/execdriver/dockerhooks"
+@@ -136,5 +137,17 @@ func (cli *DockerCli) CmdInfo(args ...string) error {
+ 	if info.ClusterAdvertise != "" {
+ 		fmt.Fprintf(cli.out, "Cluster advertise: %s\n", info.ClusterAdvertise)
+ 	}
++
++	fmt.Fprintf(cli.out, "Registries: ")
++	regs := []string{}
++	for _, r := range info.Registries {
++		s := "secure"
++		if !r.Secure {
++			s = "insecure"
++		}
++		regs = append(regs, fmt.Sprintf("%s (%s)", r.Name, s))
++	}
++	fmt.Fprintf(cli.out, "%s", strings.Join(regs, ", "))
++
+ 	return nil
+ }
+diff --git a/api/types/types.go b/api/types/types.go
+index 0b89500..3de2b1c 100644
+--- a/api/types/types.go
++++ b/api/types/types.go
+@@ -194,6 +194,12 @@ type Version struct {
+ 	PkgVersion    string `json:",omitempty"`
+ }
+ 
++// Registry holds information about a specific registry
++type Registry struct {
++	Name   string
++	Secure bool
++}
++
+ // Info contains response of Remote API:
+ // GET "/info"
+ type Info struct {
+@@ -241,6 +247,7 @@ type Info struct {
+ 	ServerVersion      string
+ 	ClusterStore       string
+ 	ClusterAdvertise   string
++	Registries         []Registry
+ }
+ 
+ // PluginsInfo is temp struct holds Plugins name
+diff --git a/daemon/info.go b/daemon/info.go
+index d8efaf6..43fc85a 100644
+--- a/daemon/info.go
++++ b/daemon/info.go
+@@ -1,6 +1,7 @@
+ package daemon
+ 
+ import (
++	"net"
+ 	"os"
+ 	"runtime"
+ 	"strings"
+@@ -18,7 +19,7 @@ import (
+ 	"github.com/docker/docker/pkg/system"
+ 	"github.com/docker/docker/registry"
+ 	"github.com/docker/docker/utils"
+-	"github.com/docker/docker/volume/drivers"
++	volumedrivers "github.com/docker/docker/volume/drivers"
+ )
+ 
+ // SystemInfo returns information about the host server the daemon is running on.
+@@ -56,6 +57,14 @@ func (daemon *Daemon) SystemInfo() (*types.Info, error) {
+ 	sysInfo := sysinfo.New(true)
+ 	packageVersion, _ := rpm.Version("/usr/bin/docker")
+ 
++	registries := []types.Registry{}
++	for _, ir := range daemon.RegistryService.Config.InsecureRegistryCIDRs {
++		registries = append(registries, types.Registry{(*net.IPNet)(ir).String(), false})
++	}
++	for n, i := range daemon.RegistryService.Config.IndexConfigs {
++		registries = append(registries, types.Registry{n, i.Secure})
++	}
++
+ 	v := &types.Info{
+ 		ID:                 daemon.ID,
+ 		Containers:         len(daemon.List()),
+@@ -93,6 +102,7 @@ func (daemon *Daemon) SystemInfo() (*types.Info, error) {
+ 		HTTPSProxy:         getProxyEnv("https_proxy"),
+ 		NoProxy:            getProxyEnv("no_proxy"),
+ 		PkgVersion:         packageVersion,
++		Registries:         registries,
+ 	}
+ 
+ 	// TODO Windows. Refactor this more once sysinfo is refactored into
+diff --git a/integration-cli/docker_cli_info_test.go b/integration-cli/docker_cli_info_test.go
+index 1eb090a..8c1f0cc 100644
+--- a/integration-cli/docker_cli_info_test.go
++++ b/integration-cli/docker_cli_info_test.go
+@@ -101,3 +101,17 @@ func (s *DockerSuite) TestInfoDiscoveryAdvertiseInterfaceName(c *check.C) {
+ 	c.Assert(out, checker.Contains, fmt.Sprintf("Cluster store: %s\n", discoveryBackend))
+ 	c.Assert(out, checker.Contains, fmt.Sprintf("Cluster advertise: %s:2375\n", ip.String()))
+ }
++
++func (s *DockerSuite) TestInfoRegistries(c *check.C) {
++	out, _ := dockerCmd(c, "info")
++	c.Assert(out, checker.Contains, "127.0.0.0/8 (insecure), docker.io (secure)")
++}
++
++func (s *DockerRegistriesSuite) TestInfoRegistriesAdditional(c *check.C) {
++	d := NewDaemon(c)
++	c.Assert(d.StartWithBusybox("--add-registry="+s.reg1.url, "--insecure-registry="+s.reg2.url), check.IsNil)
++	defer d.Stop()
++	out, _ := d.Cmd("info")
++	c.Assert(out, checker.Contains, s.reg1.url+" (insecure)")
++	c.Assert(out, checker.Contains, s.reg2.url+" (insecure)")
++}
+diff --git a/man/docker-info.1.md b/man/docker-info.1.md
+index eeb90ae..ebddc86 100644
+--- a/man/docker-info.1.md
++++ b/man/docker-info.1.md
+@@ -49,6 +49,7 @@ Here is a sample output:
+     Number of Hooks: 2
+     CPUs: 1
+     Total Memory: 2 GiB
++    Registries: docker.io (secure), 127.0.0.0/8 (insecure)
+ 
+ # HISTORY
+ April 2014, Originally compiled by William Henry (whenry at redhat dot com)

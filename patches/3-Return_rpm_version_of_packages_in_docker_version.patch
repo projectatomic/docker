@@ -1,0 +1,206 @@
+diff --git a/api/client/version.go b/api/client/version.go
+index 61125ce..41fc26f 100644
+--- a/api/client/version.go
++++ b/api/client/version.go
+@@ -10,26 +10,29 @@ import (
+ 	Cli "github.com/docker/docker/cli"
+ 	"github.com/docker/docker/dockerversion"
+ 	flag "github.com/docker/docker/pkg/mflag"
++	"github.com/docker/docker/pkg/rpm"
+ 	"github.com/docker/docker/utils"
+ )
+ 
+ var versionTemplate = `Client:
+- Version:      {{.Client.Version}}
+- API version:  {{.Client.APIVersion}}
+- Go version:   {{.Client.GoVersion}}
+- Git commit:   {{.Client.GitCommit}}
+- Built:        {{.Client.BuildTime}}
+- OS/Arch:      {{.Client.Os}}/{{.Client.Arch}}{{if .Client.Experimental}}
+- Experimental: {{.Client.Experimental}}{{end}}{{if .ServerOK}}
++ Version:         {{.Client.Version}}
++ API version:     {{.Client.APIVersion}}
++ Package version: {{.Client.PkgVersion}}
++ Go version:      {{.Client.GoVersion}}
++ Git commit:      {{.Client.GitCommit}}
++ Built:           {{.Client.BuildTime}}
++ OS/Arch:         {{.Client.Os}}/{{.Client.Arch}}{{if .Client.Experimental}}
++ Experimental:    {{.Client.Experimental}}{{end}}{{if .ServerOK}}
+ 
+ Server:
+- Version:      {{.Server.Version}}
+- API version:  {{.Server.APIVersion}}
+- Go version:   {{.Server.GoVersion}}
+- Git commit:   {{.Server.GitCommit}}
+- Built:        {{.Server.BuildTime}}
+- OS/Arch:      {{.Server.Os}}/{{.Server.Arch}}{{if .Server.Experimental}}
+- Experimental: {{.Server.Experimental}}{{end}}{{end}}`
++ Version:         {{.Server.Version}}
++ API version:     {{.Server.APIVersion}}
++ Package version: {{.Server.PkgVersion}}
++ Go version:      {{.Server.GoVersion}}
++ Git commit:      {{.Server.GitCommit}}
++ Built:           {{.Server.BuildTime}}
++ OS/Arch:         {{.Server.Os}}/{{.Server.Arch}}{{if .Server.Experimental}}
++ Experimental:    {{.Server.Experimental}}{{end}}{{end}}`
+ 
+ // CmdVersion shows Docker version information.
+ //
+@@ -53,6 +56,7 @@ func (cli *DockerCli) CmdVersion(args ...string) (err error) {
+ 		return Cli.StatusError{StatusCode: 64,
+ 			Status: "Template parsing error: " + err.Error()}
+ 	}
++	packageVersion, _ := rpm.Version("/usr/bin/docker")
+ 
+ 	vd := types.VersionResponse{
+ 		Client: &types.Version{
+@@ -64,6 +68,7 @@ func (cli *DockerCli) CmdVersion(args ...string) (err error) {
+ 			Os:           runtime.GOOS,
+ 			Arch:         runtime.GOARCH,
+ 			Experimental: utils.ExperimentalBuild(),
++			PkgVersion:   packageVersion,
+ 		},
+ 	}
+ 
+diff --git a/api/types/types.go b/api/types/types.go
+index c85d41f..3982051 100644
+--- a/api/types/types.go
++++ b/api/types/types.go
+@@ -178,6 +178,7 @@ type Version struct {
+ 	KernelVersion string `json:",omitempty"`
+ 	Experimental  bool   `json:",omitempty"`
+ 	BuildTime     string `json:",omitempty"`
++	PkgVersion    string `json:",omitempty"`
+ }
+ 
+ // Info contains response of Remote API:
+@@ -207,6 +208,7 @@ type Info struct {
+ 	LoggingDriver      string
+ 	NEventsListener    int
+ 	KernelVersion      string
++	PkgVersion         string
+ 	OperatingSystem    string
+ 	OSType             string
+ 	Architecture       string
+diff --git a/daemon/info.go b/daemon/info.go
+index 76427cc..804bbeb 100644
+--- a/daemon/info.go
++++ b/daemon/info.go
+@@ -13,6 +13,7 @@ import (
+ 	"github.com/docker/docker/pkg/parsers/kernel"
+ 	"github.com/docker/docker/pkg/parsers/operatingsystem"
+ 	"github.com/docker/docker/pkg/platform"
++	"github.com/docker/docker/pkg/rpm"
+ 	"github.com/docker/docker/pkg/sysinfo"
+ 	"github.com/docker/docker/pkg/system"
+ 	"github.com/docker/docker/registry"
+@@ -53,6 +54,7 @@ func (daemon *Daemon) SystemInfo() (*types.Info, error) {
+ 	// by hand given VERSION)
+ 	initPath := utils.DockerInitPath("")
+ 	sysInfo := sysinfo.New(true)
++	packageVersion, _ := rpm.Version("/usr/bin/docker")
+ 
+ 	v := &types.Info{
+ 		ID:                 daemon.ID,
+@@ -90,6 +92,7 @@ func (daemon *Daemon) SystemInfo() (*types.Info, error) {
+ 		HTTPProxy:          getProxyEnv("http_proxy"),
+ 		HTTPSProxy:         getProxyEnv("https_proxy"),
+ 		NoProxy:            getProxyEnv("no_proxy"),
++		PkgVersion:         packageVersion,
+ 	}
+ 
+ 	// TODO Windows. Refactor this more once sysinfo is refactored into
+@@ -115,6 +118,7 @@ func (daemon *Daemon) SystemInfo() (*types.Info, error) {
+ 
+ // SystemVersion returns version information about the daemon.
+ func (daemon *Daemon) SystemVersion() types.Version {
++	pkgVersion, _ := rpm.Version("/usr/bin/docker")
+ 	v := types.Version{
+ 		Version:      dockerversion.Version,
+ 		GitCommit:    dockerversion.GitCommit,
+@@ -123,6 +127,7 @@ func (daemon *Daemon) SystemVersion() types.Version {
+ 		Arch:         runtime.GOARCH,
+ 		BuildTime:    dockerversion.BuildTime,
+ 		Experimental: utils.ExperimentalBuild(),
++		PkgVersion:   pkgVersion,
+ 	}
+ 
+ 	if kernelVersion, err := kernel.GetKernelVersion(); err == nil {
+diff --git a/integration-cli/docker_cli_version_test.go b/integration-cli/docker_cli_version_test.go
+index 7672beb..b439e6e 100644
+--- a/integration-cli/docker_cli_version_test.go
++++ b/integration-cli/docker_cli_version_test.go
+@@ -11,14 +11,15 @@ import (
+ func (s *DockerSuite) TestVersionEnsureSucceeds(c *check.C) {
+ 	out, _ := dockerCmd(c, "version")
+ 	stringsToCheck := map[string]int{
+-		"Client:":       1,
+-		"Server:":       1,
+-		" Version:":     2,
+-		" API version:": 2,
+-		" Go version:":  2,
+-		" Git commit:":  2,
+-		" OS/Arch:":     2,
+-		" Built:":       2,
++		"Client:":           1,
++		"Server:":           1,
++		" Version:":         2,
++		" API version:":     2,
++		" Package version:": 2,
++		" Go version:":      2,
++		" Git commit:":      2,
++		" OS/Arch:":         2,
++		" Built:":           2,
+ 	}
+ 
+ 	for k, v := range stringsToCheck {
+@@ -40,19 +41,18 @@ func (s *DockerSuite) TestVersionPlatform_l(c *check.C) {
+ 
+ func testVersionPlatform(c *check.C, platform string) {
+ 	out, _ := dockerCmd(c, "version")
+-	expected := "OS/Arch:      " + platform
+ 
+ 	split := strings.Split(out, "\n")
+-	c.Assert(len(split) >= 14, checker.Equals, true, check.Commentf("got %d lines from version", len(split)))
++	c.Assert(len(split) >= 16, checker.Equals, true, check.Commentf("got %d lines from version", len(split)))
+ 
+ 	// Verify the second 'OS/Arch' matches the platform. Experimental has
+ 	// more lines of output than 'regular'
+ 	bFound := false
+-	for i := 14; i < len(split); i++ {
+-		if strings.Contains(split[i], expected) {
++	for i := 16; i < len(split); i++ {
++		if strings.Contains(split[i], "OS/Arch:") && strings.Contains(split[i], platform) {
+ 			bFound = true
+ 			break
+ 		}
+ 	}
+-	c.Assert(bFound, checker.Equals, true, check.Commentf("Could not find server '%s' in '%s'", expected, out))
++	c.Assert(bFound, checker.Equals, true, check.Commentf("Could not find server 'OS/Arch:' or '%s' in '%s'", platform, out))
+ }
+diff --git a/pkg/rpm/rpm.go b/pkg/rpm/rpm.go
+new file mode 100644
+index 0000000..494fc94
+--- /dev/null
++++ b/pkg/rpm/rpm.go
+@@ -0,0 +1,20 @@
++package rpm
++
++import (
++	"os/exec"
++	"strings"
++)
++
++// Version returns package version for the specified package or executable path
++func Version(name string) (string, error) {
++	var (
++		err    error
++		out    []byte
++		option = "-q"
++	)
++	if name[0] == '/' {
++		option = "-qf"
++	}
++	out, err = exec.Command("/usr/bin/rpm", option, name).Output()
++	return strings.Trim(string(out), "\n"), err
++}
