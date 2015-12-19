@@ -1,0 +1,1773 @@
+diff --git a/api/server/router/local/image.go b/api/server/router/local/image.go
+index 32e0da9..2af297a 100644
+--- a/api/server/router/local/image.go
++++ b/api/server/router/local/image.go
+@@ -300,7 +300,42 @@ func (s *router) deleteImages(ctx context.Context, w http.ResponseWriter, r *htt
+ }
+ 
+ func (s *router) getImagesByName(ctx context.Context, w http.ResponseWriter, r *http.Request, vars map[string]string) error {
+-	imageInspect, err := s.daemon.LookupImage(vars["name"])
++	if vars == nil {
++		return fmt.Errorf("Missing parameter")
++	}
++
++	name := vars["name"]
++
++	if httputils.BoolValue(r, "remote") {
++		authEncoded := r.Header.Get("X-Registry-Auth")
++		authConfig := &types.AuthConfig{}
++		if authEncoded != "" {
++			authJSON := base64.NewDecoder(base64.URLEncoding, strings.NewReader(authEncoded))
++			if err := json.NewDecoder(authJSON).Decode(authConfig); err != nil {
++				// for a pull it is not an error if no auth was given
++				// to increase compatibility with the existing api it is defaulting to be empty
++				authConfig = &types.AuthConfig{}
++			}
++		}
++
++		ref, err := reference.ParseNamed(name)
++		if err != nil {
++			return err
++		}
++		metaHeaders := map[string][]string{}
++		for k, v := range r.Header {
++			if strings.HasPrefix(k, "X-Meta-") {
++				metaHeaders[k] = v
++			}
++		}
++		imageInspect, err := s.daemon.LookupRemote(ref, metaHeaders, authConfig)
++		if err != nil {
++			return err
++		}
++		return httputils.WriteJSON(w, http.StatusOK, imageInspect)
++	}
++
++	imageInspect, err := s.daemon.LookupImage(name)
+ 	if err != nil {
+ 		return err
+ 	}
+@@ -308,6 +343,51 @@ func (s *router) getImagesByName(ctx context.Context, w http.ResponseWriter, r *
+ 	return httputils.WriteJSON(w, http.StatusOK, imageInspect)
+ }
+ 
++func (s *router) getImagesTags(ctx context.Context, w http.ResponseWriter, r *http.Request, vars map[string]string) error {
++	name := vars["name"]
++	authEncoded := r.Header.Get("X-Registry-Auth")
++	authConfig := &types.AuthConfig{}
++	if authEncoded != "" {
++		authJSON := base64.NewDecoder(base64.URLEncoding, strings.NewReader(authEncoded))
++		if err := json.NewDecoder(authJSON).Decode(authConfig); err != nil {
++			// for a pull it is not an error if no auth was given
++			// to increase compatibility with the existing api it is defaulting to be empty
++			authConfig = &types.AuthConfig{}
++		}
++	}
++
++	var tagList *types.RepositoryTagList
++	reposName, err := reference.WithName(name)
++	if err != nil {
++		return nil
++	}
++
++	if !httputils.BoolValue(r, "remote") {
++		tagList, err = s.daemon.ListLocalTags(reposName)
++		if err != nil {
++			logrus.Warnf("failed to get local tags for %q: %v", name, err)
++		}
++	}
++
++	if tagList == nil || err != nil {
++		metaHeaders := map[string][]string{}
++		for k, v := range r.Header {
++			if strings.HasPrefix(k, "X-Meta-") {
++				metaHeaders[k] = v
++			}
++		}
++		tagList, err = s.daemon.ListRemoteTags(reposName, metaHeaders, authConfig)
++		if err != nil {
++			logrus.Warnf("failed to get remote tags for %q: %v", name, err)
++		}
++	}
++	if err != nil {
++		return err
++	}
++
++	return httputils.WriteJSON(w, http.StatusOK, tagList)
++}
++
+ func (s *router) postBuild(ctx context.Context, w http.ResponseWriter, r *http.Request, vars map[string]string) error {
+ 	var (
+ 		authConfigs        = map[string]types.AuthConfig{}
+diff --git a/api/server/router/local/local.go b/api/server/router/local/local.go
+index 2a3106a..9ce3923 100644
+--- a/api/server/router/local/local.go
++++ b/api/server/router/local/local.go
+@@ -95,6 +95,7 @@ func (r *router) initRoutes() {
+ 		NewGetRoute("/images/{name:.*}/get", r.getImagesGet),
+ 		NewGetRoute("/images/{name:.*}/history", r.getImagesHistory),
+ 		NewGetRoute("/images/{name:.*}/json", r.getImagesByName),
++		NewGetRoute("/images/{name:.*}/tags", r.getImagesTags),
+ 		// POST
+ 		NewPostRoute("/commit", r.postCommit),
+ 		NewPostRoute("/build", r.postBuild),
+diff --git a/api/types/types.go b/api/types/types.go
+index 3982051..0b89500 100644
+--- a/api/types/types.go
++++ b/api/types/types.go
+@@ -93,9 +93,9 @@ type GraphDriverData struct {
+ 	Data map[string]string
+ }
+ 
+-// ImageInspect contains response of Remote API:
++// ImageInspectBase contains response of Remote API:
+ // GET "/images/{name:.*}/json"
+-type ImageInspect struct {
++type ImageInspectBase struct {
+ 	ID              string `json:"Id"`
+ 	RepoTags        []string
+ 	RepoDigests     []string
+@@ -110,8 +110,21 @@ type ImageInspect struct {
+ 	Architecture    string
+ 	Os              string
+ 	Size            int64
+-	VirtualSize     int64
+-	GraphDriver     GraphDriverData
++}
++
++// ImageInspect contains response of Remote API:
++// GET "/images/{name:.*}/json"
++type ImageInspect struct {
++	ImageInspectBase
++	VirtualSize int64
++	GraphDriver GraphDriverData
++}
++
++// RemoteImageInspect contains response of RemoteAPI:
++// GET "/images/{name:.*}/json?remote=1"
++type RemoteImageInspect struct {
++	ImageInspectBase
++	Registry string
+ }
+ 
+ // Port stores open ports info of container
+@@ -343,6 +356,20 @@ type MountPoint struct {
+ 	Propagation string
+ }
+ 
++// RepositoryTag stores an metadata for a image's tag.
++type RepositoryTag struct {
++	Tag     string
++	ImageID string
++}
++
++// RepositoryTagList contains the response for the remote API:
++// GET "/images/{name:.*}/tags"
++type RepositoryTagList struct {
++	// Fully qualified repository name
++	Name    string
++	TagList []*RepositoryTag
++}
++
+ // Volume represents the configuration of a volume for the remote API
+ type Volume struct {
+ 	Name       string // Name is the name of the volume
+diff --git a/daemon/daemon.go b/daemon/daemon.go
+index ce2fa73..924a9e9 100644
+--- a/daemon/daemon.go
++++ b/daemon/daemon.go
+@@ -13,6 +13,7 @@ import (
+ 	"os"
+ 	"path/filepath"
+ 	"runtime"
++	"sort"
+ 	"strings"
+ 	"sync"
+ 	"time"
+@@ -132,6 +133,12 @@ func (c *contStore) List() []*container.Container {
+ 	return *containers
+ }
+ 
++type byTagName []*types.RepositoryTag
++
++func (r byTagName) Len() int           { return len(r) }
++func (r byTagName) Swap(i, j int)      { r[i], r[j] = r[j], r[i] }
++func (r byTagName) Less(i, j int) bool { return r[i].Tag < r[j].Tag }
++
+ // Daemon holds information about the Docker daemon.
+ type Daemon struct {
+ 	ID                        string
+@@ -1187,30 +1194,44 @@ func (daemon *Daemon) LookupImage(name string) (*types.ImageInspect, error) {
+ 	}
+ 
+ 	imageInspect := &types.ImageInspect{
+-		ID:              img.ID().String(),
+-		RepoTags:        repoTags,
+-		RepoDigests:     repoDigests,
+-		Parent:          img.Parent.String(),
+-		Comment:         img.Comment,
+-		Created:         img.Created.Format(time.RFC3339Nano),
+-		Container:       img.Container,
+-		ContainerConfig: &img.ContainerConfig,
+-		DockerVersion:   img.DockerVersion,
+-		Author:          img.Author,
+-		Config:          img.Config,
+-		Architecture:    img.Architecture,
+-		Os:              img.OS,
+-		Size:            size,
+-		VirtualSize:     size, // TODO: field unused, deprecate
+-	}
+-
+-	imageInspect.GraphDriver.Name = daemon.driver.String()
+-
+-	imageInspect.GraphDriver.Data = layerMetadata
++		ImageInspectBase: types.ImageInspectBase{
++			ID:              img.ID().String(),
++			RepoTags:        repoTags,
++			RepoDigests:     repoDigests,
++			Parent:          img.Parent.String(),
++			Comment:         img.Comment,
++			Created:         img.Created.Format(time.RFC3339Nano),
++			Container:       img.Container,
++			ContainerConfig: &img.ContainerConfig,
++			DockerVersion:   img.DockerVersion,
++			Author:          img.Author,
++			Config:          img.Config,
++			Architecture:    img.Architecture,
++			Os:              img.OS,
++			Size:            size,
++		},
++		VirtualSize: size, // TODO: field unused, deprecate
++		GraphDriver: types.GraphDriverData{
++			Name: daemon.driver.String(),
++			Data: layerMetadata,
++		},
++	}
+ 
+ 	return imageInspect, nil
+ }
+ 
++// LookupRemote looks up an image in remote repository.
++func (daemon *Daemon) LookupRemote(ref reference.Named, metaHeaders map[string][]string, authConfig *types.AuthConfig) (*types.RemoteImageInspect, error) {
++	inspectConfig := &distribution.InspectConfig{
++		MetaHeaders:     metaHeaders,
++		AuthConfig:      authConfig,
++		RegistryService: daemon.RegistryService,
++		MetadataStore:   daemon.distributionMetadataStore,
++	}
++
++	return distribution.Inspect(ref, inspectConfig)
++}
++
+ // LoadImage uploads a set of images into the repository. This is the
+ // complement of ImageExport.  The input stream is an uncompressed tar
+ // ball containing images and metadata.
+@@ -1333,6 +1354,48 @@ func (daemon *Daemon) GetImage(refOrID string) (*image.Image, error) {
+ 	return daemon.imageStore.Get(imgID)
+ }
+ 
++// ListLocalTags returns a tag list for given local repository.
++func (daemon *Daemon) ListLocalTags(reposName reference.Named) (*types.RepositoryTagList, error) {
++	var tagList *types.RepositoryTagList
++
++	if err := registry.ValidateRepositoryName(reposName); err != nil {
++		return nil, err
++	}
++
++	associations := daemon.tagStore.ReferencesByName(reposName)
++	if len(associations) == 0 {
++		return nil, ErrImageDoesNotExist{reposName.String()}
++	}
++
++	tagList = &types.RepositoryTagList{
++		Name:    associations[0].Ref.Name(),
++		TagList: make([]*types.RepositoryTag, 0, len(associations)),
++	}
++
++	for _, assoc := range associations {
++		if tagged, isTagged := assoc.Ref.(reference.Tagged); isTagged {
++			tagList.TagList = append(tagList.TagList, &types.RepositoryTag{
++				Tag:     tagged.Tag(),
++				ImageID: assoc.ImageID.String(),
++			})
++		}
++	}
++
++	sort.Sort(byTagName(tagList.TagList))
++	return tagList, nil
++}
++
++// ListRemoteTags fetches a tag list from remote repository.
++func (daemon *Daemon) ListRemoteTags(ref reference.Named, metaHeaders map[string][]string, authConfig *types.AuthConfig) (*types.RepositoryTagList, error) {
++	config := &distribution.ListRemoteTagsConfig{
++		MetaHeaders:     metaHeaders,
++		AuthConfig:      authConfig,
++		RegistryService: daemon.RegistryService,
++	}
++
++	return distribution.ListRemoteTags(ref, config)
++}
++
+ // GraphDriver returns the currently used driver for processing
+ // container layers.
+ func (daemon *Daemon) GraphDriver() graphdriver.Driver {
+diff --git a/distribution/inspect.go b/distribution/inspect.go
+new file mode 100644
+index 0000000..cdc10bc
+--- /dev/null
++++ b/distribution/inspect.go
+@@ -0,0 +1,187 @@
++package distribution
++
++import (
++	"fmt"
++	"io"
++	"time"
++
++	"github.com/Sirupsen/logrus"
++	"github.com/docker/distribution/digest"
++	"github.com/docker/distribution/reference"
++	"github.com/docker/docker/api/types"
++	"github.com/docker/docker/distribution/metadata"
++	"github.com/docker/docker/image"
++	"github.com/docker/docker/registry"
++)
++
++// InspectConfig allows you to pass transport-related data to Inspect
++// function.
++type InspectConfig struct {
++	// MetaHeaders stores HTTP headers with metadata about the image
++	// (DockerHeaders with prefix X-Meta- in the request).
++	MetaHeaders map[string][]string
++	// AuthConfig holds authentication credentials for authenticating with
++	// the registry.
++	AuthConfig *types.AuthConfig
++	// OutStream is the output writer for showing the status of the pull
++	// operation.
++	OutStream io.Writer
++	// RegistryService is the registry service to use for TLS configuration
++	// and endpoint lookup.
++	RegistryService *registry.Service
++	// MetadataStore is the storage backend for distribution-specific
++	// metadata.
++	MetadataStore metadata.Store
++}
++
++// ManifestFetcher allows to pull image's json without any binary blobs.
++type ManifestFetcher interface {
++	Fetch(ref reference.Named) (imgInspect *types.RemoteImageInspect, fallback bool, err error)
++}
++
++// NewManifestFetcher creates appropriate fetcher instance for given endpoint.
++func newManifestFetcher(endpoint registry.APIEndpoint, repoInfo *registry.RepositoryInfo, config *InspectConfig) (ManifestFetcher, error) {
++	switch endpoint.Version {
++	case registry.APIVersion2:
++		return &v2ManifestFetcher{
++			endpoint: endpoint,
++			config:   config,
++			repoInfo: repoInfo,
++		}, nil
++	case registry.APIVersion1:
++		return &v1ManifestFetcher{
++			endpoint: endpoint,
++			config:   config,
++			repoInfo: repoInfo,
++		}, nil
++	}
++	return nil, fmt.Errorf("unknown version %d for registry %s", endpoint.Version, endpoint.URL)
++}
++
++func makeRemoteImageInspect(repoInfo *registry.RepositoryInfo, img *image.Image, tag string, dgst digest.Digest) *types.RemoteImageInspect {
++	var repoTags = make([]string, 0, 1)
++	if tag != "" {
++		tagged, err := reference.WithTag(repoInfo.CanonicalName, tag)
++		if err == nil {
++			repoTags = append(repoTags, tagged.String())
++		}
++	}
++	var repoDigests = make([]string, 0, 1)
++	if err := dgst.Validate(); err == nil {
++		repoDigests = append(repoDigests, dgst.String())
++	}
++	return &types.RemoteImageInspect{
++		ImageInspectBase: types.ImageInspectBase{
++			ID:              img.ID().String(),
++			RepoTags:        repoTags,
++			RepoDigests:     repoDigests,
++			Parent:          img.Parent.String(),
++			Comment:         img.Comment,
++			Created:         img.Created.Format(time.RFC3339Nano),
++			Container:       img.Container,
++			ContainerConfig: &img.ContainerConfig,
++			DockerVersion:   img.DockerVersion,
++			Author:          img.Author,
++			Config:          img.Config,
++			Architecture:    img.Architecture,
++			Os:              img.OS,
++			Size:            img.Size,
++		},
++		Registry: repoInfo.Index.Name,
++	}
++}
++
++// Inspect returns metadata for remote image.
++func Inspect(ref reference.Named, config *InspectConfig) (*types.RemoteImageInspect, error) {
++	var (
++		imageInspect *types.RemoteImageInspect
++		err          error
++	)
++	// Unless the index name is specified, iterate over all registries until
++	// the matching image is found.
++	if registry.IsReferenceFullyQualified(ref) {
++		return fetchManifest(ref, config)
++	}
++	if len(registry.RegistryList) == 0 {
++		return nil, fmt.Errorf("No configured registry to pull from.")
++	}
++	for _, r := range registry.RegistryList {
++		// Prepend the index name to the image name.
++		fqr, _err := registry.FullyQualifyReferenceWith(r, ref)
++		if _err != nil {
++			logrus.Warnf("Failed to fully qualify %q name with %q registry: %v", ref.Name(), r, _err)
++			err = _err
++			continue
++		}
++		// Prepend the index name to the image name.
++		if imageInspect, err = fetchManifest(fqr, config); err == nil {
++			return imageInspect, nil
++		}
++	}
++	return imageInspect, err
++}
++
++func fetchManifest(ref reference.Named, config *InspectConfig) (*types.RemoteImageInspect, error) {
++	// Resolve the Repository name from fqn to RepositoryInfo
++	repoInfo, err := config.RegistryService.ResolveRepository(ref)
++	if err != nil {
++		return nil, err
++	}
++
++	if err := validateRepoName(repoInfo.LocalName.Name()); err != nil {
++		return nil, err
++	}
++
++	endpoints, err := config.RegistryService.LookupPullEndpoints(repoInfo.CanonicalName)
++	if err != nil {
++		return nil, err
++	}
++
++	var (
++		lastErr error
++		// discardNoSupportErrors is used to track whether an endpoint encountered an error of type registry.ErrNoSupport
++		// By default it is false, which means that if a ErrNoSupport error is encountered, it will be saved in lastErr.
++		// As soon as another kind of error is encountered, discardNoSupportErrors is set to true, avoiding the saving of
++		// any subsequent ErrNoSupport errors in lastErr.
++		// It's needed for pull-by-digest on v1 endpoints: if there are only v1 endpoints configured, the error should be
++		// returned and displayed, but if there was a v2 endpoint which supports pull-by-digest, then the last relevant
++		// error is the ones from v2 endpoints not v1.
++		discardNoSupportErrors bool
++		imgInspect             *types.RemoteImageInspect
++	)
++	for _, endpoint := range endpoints {
++		logrus.Debugf("Trying to fetch image manifest of %s repository from %s %s", repoInfo.CanonicalName, endpoint.URL, endpoint.Version)
++		fallback := false
++
++		fetcher, err := newManifestFetcher(endpoint, repoInfo, config)
++		if err != nil {
++			lastErr = err
++			continue
++		}
++		imgInspect, fallback, err = fetcher.Fetch(ref)
++		if err != nil {
++			if fallback {
++				if _, ok := err.(registry.ErrNoSupport); !ok {
++					// Because we found an error that's not ErrNoSupport, discard all subsequent ErrNoSupport errors.
++					discardNoSupportErrors = true
++					// save the current error
++					lastErr = err
++				} else if !discardNoSupportErrors {
++					// Save the ErrNoSupport error, because it's either the first error or all encountered errors
++					// were also ErrNoSupport errors.
++					lastErr = err
++				}
++				continue
++			}
++			logrus.Debugf("Not continuing with error: %v", err)
++			return nil, err
++		}
++
++		return imgInspect, nil
++	}
++
++	if lastErr == nil {
++		lastErr = fmt.Errorf("no endpoints found for %s", repoInfo.Index.Name)
++	}
++	return nil, lastErr
++}
+diff --git a/distribution/inspect_v1.go b/distribution/inspect_v1.go
+new file mode 100644
+index 0000000..ccfc08e
+--- /dev/null
++++ b/distribution/inspect_v1.go
+@@ -0,0 +1,160 @@
++package distribution
++
++import (
++	"encoding/json"
++	"errors"
++	"fmt"
++	"strings"
++
++	"github.com/Sirupsen/logrus"
++	"github.com/docker/distribution/reference"
++	"github.com/docker/distribution/registry/client/transport"
++	"github.com/docker/docker/api/types"
++	"github.com/docker/docker/image"
++	"github.com/docker/docker/image/v1"
++	"github.com/docker/docker/registry"
++	tagpkg "github.com/docker/docker/tag"
++)
++
++type v1ManifestFetcher struct {
++	endpoint registry.APIEndpoint
++	config   *InspectConfig
++	repoInfo *registry.RepositoryInfo
++	session  *registry.Session
++}
++
++func (mf *v1ManifestFetcher) Fetch(ref reference.Named) (imgInspect *types.RemoteImageInspect, fallback bool, err error) {
++	if _, isDigested := ref.(reference.Digested); isDigested {
++		// Allowing fallback, because HTTPS v1 is before HTTP v2
++		return nil, true, registry.ErrNoSupport{errors.New("Cannot pull by digest with v1 registry")}
++	}
++	tag := ""
++	if tagged, isTagged := ref.(reference.Tagged); isTagged {
++		tag = tagged.Tag()
++	}
++	tlsConfig, err := mf.config.RegistryService.TLSConfig(mf.repoInfo.Index.Name)
++	if err != nil {
++		return nil, false, err
++	}
++	// Adds Docker-specific headers as well as user-specified headers (metaHeaders)
++	tr := transport.NewTransport(
++		// TODO(tiborvass): was ReceiveTimeout
++		registry.NewTransport(tlsConfig),
++		registry.DockerHeaders(mf.config.MetaHeaders)...,
++	)
++	client := registry.HTTPClient(tr)
++	v1Endpoint, err := mf.endpoint.ToV1Endpoint(mf.config.MetaHeaders)
++	if err != nil {
++		logrus.Debugf("Could not get v1 endpoint: %v", err)
++		return nil, true, err
++	}
++	mf.session, err = registry.NewSession(client, mf.config.AuthConfig, v1Endpoint)
++	if err != nil {
++		// TODO(dmcgowan): Check if should fallback
++		logrus.Debugf("Fallback from error: %s", err)
++		return nil, true, err
++	}
++	imgInspect, err = mf.fetchWithSession(tag)
++	return
++}
++
++func (mf *v1ManifestFetcher) fetchWithSession(askedTag string) (*types.RemoteImageInspect, error) {
++	repoData, err := mf.session.GetRepositoryData(mf.repoInfo.RemoteName)
++	if err != nil {
++		if strings.Contains(err.Error(), "HTTP code: 404") {
++			return nil, fmt.Errorf("Error: image %s not found", mf.repoInfo.RemoteName)
++		}
++		// Unexpected HTTP error
++		return nil, err
++	}
++
++	logrus.Debugf("Retrieving the tag list from V1 endpoints")
++	tagsList, err := mf.session.GetRemoteTags(repoData.Endpoints, mf.repoInfo.RemoteName)
++	if err != nil {
++		logrus.Errorf("Unable to get remote tags: %s", err)
++		return nil, err
++	}
++	if len(tagsList) < 1 {
++		return nil, fmt.Errorf("No tags available for remote repository %s", mf.repoInfo.CanonicalName)
++	}
++
++	for tag, id := range tagsList {
++		repoData.ImgList[id] = &registry.ImgData{
++			ID:       id,
++			Tag:      tag,
++			Checksum: "",
++		}
++	}
++
++	// If no tag has been specified, choose `latest` if it exists
++	if askedTag == "" {
++		if _, exists := tagsList[tagpkg.DefaultTag]; exists {
++			askedTag = tagpkg.DefaultTag
++		}
++	}
++	if askedTag == "" {
++		// fallback to any tag in the repository
++		for tag := range tagsList {
++			askedTag = tag
++			break
++		}
++	}
++
++	id, exists := tagsList[askedTag]
++	if !exists {
++		return nil, fmt.Errorf("Tag %s not found in repository %s", askedTag, mf.repoInfo.CanonicalName)
++	}
++	img := repoData.ImgList[id]
++
++	var pulledImg *image.Image
++	for _, ep := range mf.repoInfo.Index.Mirrors {
++		if pulledImg, err = mf.pullImageJSON(img.ID, ep, repoData.Tokens); err != nil {
++			// Don't report errors when pulling from mirrors.
++			logrus.Debugf("Error pulling image json of %s:%s, mirror: %s, %s", mf.repoInfo.CanonicalName, img.Tag, ep, err)
++			continue
++		}
++		break
++	}
++	if pulledImg == nil {
++		for _, ep := range repoData.Endpoints {
++			if pulledImg, err = mf.pullImageJSON(img.ID, ep, repoData.Tokens); err != nil {
++				// It's not ideal that only the last error is returned, it would be better to concatenate the errors.
++				logrus.Infof("Error pulling image json of %s:%s, endpoint: %s, %v", mf.repoInfo.CanonicalName, img.Tag, ep, err)
++				continue
++			}
++			break
++		}
++	}
++	if err != nil {
++		return nil, fmt.Errorf("Error pulling image (%s) from %s, %v", img.Tag, mf.repoInfo.CanonicalName, err)
++	}
++	if pulledImg == nil {
++		return nil, fmt.Errorf("No such image %s:%s", mf.repoInfo.CanonicalName, askedTag)
++	}
++
++	return makeRemoteImageInspect(mf.repoInfo, pulledImg, askedTag, ""), nil
++}
++
++func (mf *v1ManifestFetcher) pullImageJSON(imgID, endpoint string, token []string) (*image.Image, error) {
++	imgJSON, _, err := mf.session.GetRemoteImageJSON(imgID, endpoint)
++	if err != nil {
++		return nil, err
++	}
++	h, err := v1.HistoryFromConfig(imgJSON, false)
++	if err != nil {
++		return nil, err
++	}
++	configRaw, err := v1.MakeRawConfigFromV1Config(imgJSON, image.NewRootFS(), []image.History{h})
++	if err != nil {
++		return nil, err
++	}
++	config, err := json.Marshal(configRaw)
++	if err != nil {
++		return nil, err
++	}
++	img, err := image.NewFromJSON(config)
++	if err != nil {
++		return nil, err
++	}
++	return img, nil
++}
+diff --git a/distribution/inspect_v2.go b/distribution/inspect_v2.go
+new file mode 100644
+index 0000000..e7a5880
+--- /dev/null
++++ b/distribution/inspect_v2.go
+@@ -0,0 +1,162 @@
++package distribution
++
++import (
++	"encoding/json"
++	"fmt"
++
++	"github.com/Sirupsen/logrus"
++	"github.com/docker/distribution"
++	"github.com/docker/distribution/digest"
++	"github.com/docker/distribution/manifest/schema1"
++	"github.com/docker/distribution/reference"
++	"github.com/docker/docker/api/types"
++	"github.com/docker/docker/image"
++	"github.com/docker/docker/image/v1"
++	"github.com/docker/docker/registry"
++	tagpkg "github.com/docker/docker/tag"
++	"golang.org/x/net/context"
++)
++
++type v2ManifestFetcher struct {
++	endpoint registry.APIEndpoint
++	config   *InspectConfig
++	repoInfo *registry.RepositoryInfo
++	repo     distribution.Repository
++}
++
++func (mf *v2ManifestFetcher) Fetch(ref reference.Named) (imgInspect *types.RemoteImageInspect, fallback bool, err error) {
++	mf.repo, err = NewV2Repository(mf.repoInfo, mf.endpoint, mf.config.MetaHeaders, mf.config.AuthConfig)
++	if err != nil {
++		logrus.Debugf("Error getting v2 registry: %v", err)
++		return nil, true, err
++	}
++
++	imgInspect, err = mf.fetchWithRepository(ref)
++	if err != nil && registry.ContinueOnError(err) {
++		logrus.Debugf("Error trying v2 registry: %v", err)
++		fallback = true
++	}
++	return
++}
++
++func (mf *v2ManifestFetcher) fetchWithRepository(ref reference.Named) (*types.RemoteImageInspect, error) {
++	var (
++		exists             bool
++		dgst               digest.Digest
++		err                error
++		img                *image.Image
++		unverifiedManifest *schema1.SignedManifest
++		tag                string
++		tagOrDigest        string
++	)
++
++	manSvc, err := mf.repo.Manifests(context.Background())
++	if err != nil {
++		return nil, err
++	}
++	if digested, isDigested := ref.(reference.Digested); isDigested {
++		exists, err = manSvc.Exists(digested.Digest())
++		if err == nil && !exists {
++			return nil, fmt.Errorf("Digest %q does not exist in remote repository %s", digested.Digest().String(), mf.repoInfo.CanonicalName.Name())
++		}
++		if exists {
++			unverifiedManifest, err = manSvc.Get(digested.Digest())
++		}
++		tagOrDigest = digested.Digest().String()
++
++	} else {
++		if tagged, isTagged := ref.(reference.Tagged); isTagged {
++			tag = tagged.Tag()
++			exists, err = manSvc.ExistsByTag(tag)
++			if err != nil {
++				return nil, err
++			}
++			if err == nil && !exists {
++				return nil, fmt.Errorf("Tag %q does not exist in remote repository %s", tag, mf.repoInfo.CanonicalName.Name())
++			}
++
++		} else {
++			tagList, err := manSvc.Tags()
++			if err != nil {
++				return nil, err
++			}
++			for _, t := range tagList {
++				if t == tagpkg.DefaultTag {
++					tag = tagpkg.DefaultTag
++				}
++			}
++			if tag == "" && len(tagList) > 0 {
++				tag = tagList[0]
++			}
++			if tag == "" {
++				return nil, fmt.Errorf("No tags available for remote repository %s", mf.repoInfo.CanonicalName.Name())
++			}
++		}
++
++		unverifiedManifest, err = manSvc.GetByTag(tag)
++		tagOrDigest = tag
++	}
++
++	if err != nil {
++		return nil, err
++	}
++	if unverifiedManifest == nil {
++		return nil, fmt.Errorf("image manifest does not exist for tag or digest %q", tagOrDigest)
++	}
++
++	var verifiedManifest *schema1.Manifest
++	verifiedManifest, err = verifyManifest(unverifiedManifest, ref)
++	if err != nil {
++		return nil, err
++	}
++
++	rootFS := image.NewRootFS()
++
++	// remove duplicate layers and check parent chain validity
++	err = fixManifestLayers(verifiedManifest)
++	if err != nil {
++		return nil, err
++	}
++
++	// Image history converted to the new format
++	var history []image.History
++
++	// Note that the order of this loop is in the direction of bottom-most
++	// to top-most, so that the downloads slice gets ordered correctly.
++	for i := len(verifiedManifest.FSLayers) - 1; i >= 0; i-- {
++		var throwAway struct {
++			ThrowAway bool `json:"throwaway,omitempty"`
++		}
++		if err := json.Unmarshal([]byte(verifiedManifest.History[i].V1Compatibility), &throwAway); err != nil {
++			return nil, err
++		}
++
++		h, err := v1.HistoryFromConfig([]byte(verifiedManifest.History[i].V1Compatibility), throwAway.ThrowAway)
++		if err != nil {
++			return nil, err
++		}
++		history = append(history, h)
++	}
++
++	configRaw, err := v1.MakeRawConfigFromV1Config([]byte(unverifiedManifest.History[0].V1Compatibility), rootFS, history)
++	if err != nil {
++		return nil, err
++	}
++
++	config, err := json.Marshal(configRaw)
++	if err != nil {
++		return nil, err
++	}
++
++	dgst, _, err = digestFromManifest(unverifiedManifest, mf.repoInfo.LocalName.Name())
++	if err != nil {
++		return nil, err
++	}
++
++	img, err = image.NewFromJSON(config)
++	if err != nil {
++		return nil, err
++	}
++
++	return makeRemoteImageInspect(mf.repoInfo, img, tag, dgst), nil
++}
+diff --git a/distribution/list.go b/distribution/list.go
+new file mode 100644
+index 0000000..5d76ab9
+--- /dev/null
++++ b/distribution/list.go
+@@ -0,0 +1,173 @@
++package distribution
++
++import (
++	"fmt"
++	"io"
++	"sort"
++	"strings"
++
++	"github.com/Sirupsen/logrus"
++	"github.com/docker/distribution/reference"
++	"github.com/docker/docker/api/types"
++	"github.com/docker/docker/registry"
++)
++
++type byTagName []*types.RepositoryTag
++
++func (r byTagName) Len() int           { return len(r) }
++func (r byTagName) Swap(i, j int)      { r[i], r[j] = r[j], r[i] }
++func (r byTagName) Less(i, j int) bool { return r[i].Tag < r[j].Tag }
++
++type byAPIVersion []registry.APIEndpoint
++
++func (r byAPIVersion) Len() int      { return len(r) }
++func (r byAPIVersion) Swap(i, j int) { r[i], r[j] = r[j], r[i] }
++func (r byAPIVersion) Less(i, j int) bool {
++	if r[i].Version < r[j].Version {
++		return true
++	}
++	if r[i].Version == r[j].Version && strings.HasPrefix(r[i].URL, "https://") && !strings.HasPrefix(r[j].URL, "https://") {
++		return true
++	}
++	return false
++}
++
++// TagLister allows to list tags of remote repository.
++type TagLister interface {
++	ListTags() (tagList []*types.RepositoryTag, fallback bool, err error)
++}
++
++// ListRemoteTagsConfig allows to specify transport paramater for remote ta listing.
++type ListRemoteTagsConfig struct {
++	// MetaHeaders stores HTTP headers with metadata about the image
++	// (DockerHeaders with prefix X-Meta- in the request).
++	MetaHeaders map[string][]string
++	// AuthConfig holds authentication credentials for authenticating with
++	// the registry.
++	AuthConfig *types.AuthConfig
++	// OutStream is the output writer for showing the status of the pull
++	// operation.
++	OutStream io.Writer
++	// RegistryService is the registry service to use for TLS configuration
++	// and endpoint lookup.
++	RegistryService *registry.Service
++}
++
++// ListRemoteTags fetches a tag list from remote repository
++func ListRemoteTags(ref reference.Named, config *ListRemoteTagsConfig) (*types.RepositoryTagList, error) {
++	var tagList *types.RepositoryTagList
++	// Unless the index name is specified, iterate over all registries until
++	// the matching image is found.
++	if registry.IsReferenceFullyQualified(ref) {
++		return getRemoteTagList(ref, config)
++	}
++	if len(registry.RegistryList) == 0 {
++		return nil, fmt.Errorf("No configured registry to pull from.")
++	}
++	err := registry.ValidateRepositoryName(ref)
++	if err != nil {
++		return nil, err
++	}
++	for _, r := range registry.RegistryList {
++		// Prepend the index name to the image name.
++		fqr, _err := registry.FullyQualifyReferenceWith(r, ref)
++		if _err != nil {
++			logrus.Warnf("Failed to fully qualify %q name with %q registry: %v", ref.Name(), r, _err)
++			err = _err
++			continue
++		}
++		if tagList, err = getRemoteTagList(fqr, config); err == nil {
++			return tagList, nil
++		}
++	}
++	return tagList, err
++}
++
++// newTagLister creates a specific tag lister for given endpoint.
++func newTagLister(endpoint registry.APIEndpoint, repoInfo *registry.RepositoryInfo, config *ListRemoteTagsConfig) (TagLister, error) {
++	switch endpoint.Version {
++	case registry.APIVersion2:
++		return &v2TagLister{
++			endpoint: endpoint,
++			config:   config,
++			repoInfo: repoInfo,
++		}, nil
++	case registry.APIVersion1:
++		return &v1TagLister{
++			endpoint: endpoint,
++			config:   config,
++			repoInfo: repoInfo,
++		}, nil
++	}
++	return nil, fmt.Errorf("unknown version %d for registry %s", endpoint.Version, endpoint.URL)
++}
++
++func getRemoteTagList(ref reference.Named, config *ListRemoteTagsConfig) (*types.RepositoryTagList, error) {
++	// Resolve the Repository name from fqn to RepositoryInfo
++	repoInfo, err := config.RegistryService.ResolveRepository(ref)
++	if err != nil {
++		return nil, err
++	}
++
++	if err := validateRepoName(repoInfo.LocalName.Name()); err != nil {
++		return nil, err
++	}
++
++	endpoints, err := config.RegistryService.LookupPullEndpoints(repoInfo.CanonicalName)
++	if err != nil {
++		return nil, err
++	}
++	// Prefer v1 versions which provide also image ids
++	sort.Sort(byAPIVersion(endpoints))
++
++	var (
++		lastErr error
++		// discardNoSupportErrors is used to track whether an endpoint encountered an error of type registry.ErrNoSupport
++		// By default it is false, which means that if a ErrNoSupport error is encountered, it will be saved in lastErr.
++		// As soon as another kind of error is encountered, discardNoSupportErrors is set to true, avoiding the saving of
++		// any subsequent ErrNoSupport errors in lastErr.
++		// It's needed for pull-by-digest on v1 endpoints: if there are only v1 endpoints configured, the error should be
++		// returned and displayed, but if there was a v2 endpoint which supports pull-by-digest, then the last relevant
++		// error is the ones from v2 endpoints not v1.
++		discardNoSupportErrors bool
++		tagList                = &types.RepositoryTagList{Name: repoInfo.CanonicalName.Name()}
++	)
++	for _, endpoint := range endpoints {
++		logrus.Debugf("Trying to fetch tag list of %s repository from %s %s", repoInfo.CanonicalName.String(), endpoint.URL, endpoint.Version)
++		fallback := false
++
++		tagLister, err := newTagLister(endpoint, repoInfo, config)
++		if err != nil {
++			lastErr = err
++			continue
++		}
++		tagList.TagList, fallback, err = tagLister.ListTags()
++		if err != nil {
++			// We're querying v1 registries first. Let's ignore errors until
++			// the first v2 registry.
++			if fallback || endpoint.Version == registry.APIVersion1 {
++				if _, ok := err.(registry.ErrNoSupport); !ok {
++					// Because we found an error that's not ErrNoSupport, discard all subsequent ErrNoSupport errors.
++					discardNoSupportErrors = true
++					// save the current error
++					lastErr = err
++				} else if !discardNoSupportErrors {
++					// Save the ErrNoSupport error, because it's either the first error or all encountered errors
++					// were also ErrNoSupport errors.
++					lastErr = err
++				}
++				continue
++			}
++			logrus.Debugf("Not continuing with error: %v", err)
++			return nil, err
++		}
++
++		sort.Sort(byTagName(tagList.TagList))
++		return tagList, nil
++	}
++
++	if lastErr == nil {
++		lastErr = fmt.Errorf("no endpoints found for %s", repoInfo.Index.Name)
++	}
++	return nil, lastErr
++}
+diff --git a/distribution/list_v1.go b/distribution/list_v1.go
+new file mode 100644
+index 0000000..8cc9dcb
+--- /dev/null
++++ b/distribution/list_v1.go
+@@ -0,0 +1,73 @@
++package distribution
++
++import (
++	"fmt"
++	"strings"
++
++	"github.com/Sirupsen/logrus"
++	"github.com/docker/distribution/registry/client/transport"
++	"github.com/docker/docker/api/types"
++	"github.com/docker/docker/registry"
++)
++
++type v1TagLister struct {
++	endpoint registry.APIEndpoint
++	config   *ListRemoteTagsConfig
++	repoInfo *registry.RepositoryInfo
++	session  *registry.Session
++}
++
++func (tl *v1TagLister) ListTags() ([]*types.RepositoryTag, bool, error) {
++	tlsConfig, err := tl.config.RegistryService.TLSConfig(tl.repoInfo.Index.Name)
++	if err != nil {
++		return nil, false, err
++	}
++	// Adds Docker-specific headers as well as user-specified headers (metaHeaders)
++	tr := transport.NewTransport(
++		// TODO(tiborvass): was ReceiveTimeout
++		registry.NewTransport(tlsConfig),
++		registry.DockerHeaders(tl.config.MetaHeaders)...,
++	)
++	client := registry.HTTPClient(tr)
++	v1Endpoint, err := tl.endpoint.ToV1Endpoint(tl.config.MetaHeaders)
++	if err != nil {
++		logrus.Debugf("Could not get v1 endpoint: %v", err)
++		return nil, true, err
++	}
++	tl.session, err = registry.NewSession(client, tl.config.AuthConfig, v1Endpoint)
++	if err != nil {
++		// TODO(dmcgowan): Check if should fallback
++		logrus.Debugf("Fallback from error: %s", err)
++		return nil, true, err
++	}
++	tagList, err := tl.listTagsWithSession()
++	return tagList, false, err
++}
++
++func (tl *v1TagLister) listTagsWithSession() ([]*types.RepositoryTag, error) {
++	repoData, err := tl.session.GetRepositoryData(tl.repoInfo.RemoteName)
++	if err != nil {
++		if strings.Contains(err.Error(), "HTTP code: 404") {
++			return nil, fmt.Errorf("Error: image %s not found", tl.repoInfo.RemoteName)
++		}
++		// Unexpected HTTP error
++		return nil, err
++	}
++
++	logrus.Debugf("Retrieving the tag list from V1 endpoints")
++	tagsList, err := tl.session.GetRemoteTags(repoData.Endpoints, tl.repoInfo.RemoteName)
++	if err != nil {
++		logrus.Errorf("Unable to get remote tags: %s", err)
++		return nil, err
++	}
++	if len(tagsList) < 1 {
++		return nil, fmt.Errorf("No tags available for remote repository %s", tl.repoInfo.CanonicalName)
++	}
++
++	tagList := make([]*types.RepositoryTag, 0, len(tagsList))
++	for tag, imageID := range tagsList {
++		tagList = append(tagList, &types.RepositoryTag{Tag: tag, ImageID: imageID})
++	}
++
++	return tagList, nil
++}
+diff --git a/distribution/list_v2.go b/distribution/list_v2.go
+new file mode 100644
+index 0000000..3c30028
+--- /dev/null
++++ b/distribution/list_v2.go
+@@ -0,0 +1,55 @@
++package distribution
++
++import (
++	"github.com/Sirupsen/logrus"
++	"github.com/docker/distribution"
++	"github.com/docker/distribution/registry/api/errcode"
++	"github.com/docker/docker/api/types"
++	"github.com/docker/docker/registry"
++	"golang.org/x/net/context"
++)
++
++type v2TagLister struct {
++	endpoint registry.APIEndpoint
++	config   *ListRemoteTagsConfig
++	repoInfo *registry.RepositoryInfo
++	repo     distribution.Repository
++}
++
++func (tl *v2TagLister) ListTags() (tagList []*types.RepositoryTag, fallback bool, err error) {
++	tl.repo, err = NewV2Repository(tl.repoInfo, tl.endpoint, tl.config.MetaHeaders, tl.config.AuthConfig)
++	if err != nil {
++		logrus.Debugf("Error getting v2 registry: %v", err)
++		return nil, true, err
++	}
++
++	tagList, err = tl.listTagsWithRepository()
++	if err != nil && registry.ContinueOnError(err) {
++		logrus.Debugf("Error trying v2 registry: %v", err)
++		fallback = true
++	}
++	return
++}
++
++func (tl *v2TagLister) listTagsWithRepository() ([]*types.RepositoryTag, error) {
++	logrus.Debugf("Retrieving the tag list from V2 endpoint %v", tl.endpoint.URL)
++	manSvc, err := tl.repo.Manifests(context.Background())
++	if err != nil {
++		return nil, err
++	}
++	tags, err := manSvc.Tags()
++	if err != nil {
++		switch t := err.(type) {
++		case errcode.Errors:
++			if len(t) == 1 {
++				return nil, t[0]
++			}
++		}
++		return nil, err
++	}
++	tagList := make([]*types.RepositoryTag, len(tags))
++	for i, tag := range tags {
++		tagList[i] = &types.RepositoryTag{Tag: tag}
++	}
++	return tagList, nil
++}
+diff --git a/image/v1/imagev1.go b/image/v1/imagev1.go
+index 4a67c01..ba93a16 100644
+--- a/image/v1/imagev1.go
++++ b/image/v1/imagev1.go
+@@ -66,8 +66,10 @@ func CreateID(v1Image image.V1Image, layerID layer.ChainID, parent digest.Digest
+ 	return digest.FromBytes(configJSON)
+ }
+ 
+-// MakeConfigFromV1Config creates an image config from the legacy V1 config format.
+-func MakeConfigFromV1Config(imageJSON []byte, rootfs *image.RootFS, history []image.History) ([]byte, error) {
++// MakeRawConfigFromV1Config creates an image config from the legacy V1 config
++// format and returns it as a map of json raw messages. No attributes will be
++// removed from the config.
++func MakeRawConfigFromV1Config(imageJSON []byte, rootfs *image.RootFS, history []image.History) (map[string]*json.RawMessage, error) {
+ 	var dver struct {
+ 		DockerVersion string `json:"docker_version"`
+ 	}
+@@ -95,6 +97,19 @@ func MakeConfigFromV1Config(imageJSON []byte, rootfs *image.RootFS, history []im
+ 		return nil, err
+ 	}
+ 
++	c["rootfs"] = rawJSON(rootfs)
++	c["history"] = rawJSON(history)
++
++	return c, nil
++}
++
++// MakeConfigFromV1Config creates an image config from the legacy V1 config format.
++func MakeConfigFromV1Config(imageJSON []byte, rootfs *image.RootFS, history []image.History) ([]byte, error) {
++	c, err := MakeRawConfigFromV1Config(imageJSON, rootfs, history)
++	if err != nil {
++		return nil, err
++	}
++
+ 	delete(c, "id")
+ 	delete(c, "parent")
+ 	delete(c, "Size") // Size is calculated from data on disk and is inconsitent
+@@ -102,9 +117,6 @@ func MakeConfigFromV1Config(imageJSON []byte, rootfs *image.RootFS, history []im
+ 	delete(c, "layer_id")
+ 	delete(c, "throwaway")
+ 
+-	c["rootfs"] = rawJSON(rootfs)
+-	c["history"] = rawJSON(history)
+-
+ 	return json.Marshal(c)
+ }
+ 
+diff --git a/integration-cli/docker_api_inspect_test.go b/integration-cli/docker_api_inspect_test.go
+index 37172b0..14db499 100644
+--- a/integration-cli/docker_api_inspect_test.go
++++ b/integration-cli/docker_api_inspect_test.go
+@@ -1,8 +1,11 @@
+ package main
+ 
+ import (
++	"bytes"
+ 	"encoding/json"
++	"fmt"
+ 	"net/http"
++	"reflect"
+ 	"strings"
+ 
+ 	"github.com/docker/docker/api/types"
+@@ -163,3 +166,220 @@ func (s *DockerSuite) TestInspectApiBridgeNetworkSettings121(c *check.C) {
+ 	c.Assert(settings.Networks["bridge"], checker.Not(checker.IsNil))
+ 	c.Assert(settings.IPAddress, checker.Equals, settings.Networks["bridge"].IPAddress)
+ }
++
++func compareInspectValues(c *check.C, name string, fst, snd interface{}, localVsRemote bool) {
++	additionalLocalAttributes := map[string]struct{}{}
++	additionalRemoteAttributes := map[string]struct{}{}
++	if localVsRemote {
++		additionalLocalAttributes = map[string]struct{}{
++			"GraphDriver": {},
++			"VirtualSize": {},
++		}
++		additionalRemoteAttributes = map[string]struct{}{"Registry": {}}
++	}
++
++	isRootObject := len(name) <= 1
++
++	compareArrays := func(lVal, rVal []interface{}) {
++		if len(lVal) != len(rVal) {
++			c.Errorf("array length differs between fst and snd for %q: %d != %d", name, len(lVal), len(rVal))
++		}
++		for i := 0; i < len(lVal) && i < len(rVal); i++ {
++			compareInspectValues(c, fmt.Sprintf("%s[%d]", name, i), lVal[i], rVal[i], localVsRemote)
++		}
++	}
++
++	if reflect.TypeOf(fst) != reflect.TypeOf(snd) {
++		c.Errorf("types don't match for %q: %T != %T", name, fst, snd)
++		return
++	}
++	switch fst.(type) {
++	case bool:
++		lVal := fst.(bool)
++		rVal := snd.(bool)
++		if lVal != rVal {
++			c.Errorf("fst value differs from snd for %q: %t != %t", name, lVal, rVal)
++		}
++
++	case float64:
++		lVal := fst.(float64)
++		rVal := snd.(float64)
++		if !strings.HasSuffix(name, ".Size") {
++			if lVal != rVal {
++				c.Errorf("fst value differs from snd for %q: %f != %f", name, lVal, rVal)
++			}
++		}
++
++	case string:
++		lVal := fst.(string)
++		rVal := snd.(string)
++		if !strings.HasSuffix(name, ".Id") && !strings.HasSuffix(name, ".Parent") {
++			if lVal != rVal {
++				c.Errorf("fst value differs from snd for %q: %q != %q", name, lVal, rVal)
++			}
++		}
++
++	// JSON array
++	case []interface{}:
++		lVal := fst.([]interface{})
++		rVal := snd.([]interface{})
++		if strings.HasSuffix(name, ".RepoTags") {
++			if len(rVal) != 1 {
++				c.Errorf("expected one item in remote Tags, not: %d", len(rVal))
++			} else {
++				found := false
++				for _, v := range lVal {
++					if v.(string) == rVal[0].(string) {
++						found = true
++						break
++					}
++				}
++				if !found {
++					c.Errorf("expected remote tag %q to be in among local ones: %v", rVal[0].(string), lVal)
++				}
++			}
++		} else if strings.HasSuffix(name, ".RepoDigests") {
++			if len(lVal) >= 1 {
++				compareArrays(lVal, rVal)
++			}
++			if len(rVal) != 1 {
++				c.Errorf("expected just one item in %q array, not %d (%v)", name, len(rVal), rVal)
++			}
++		} else {
++			compareArrays(lVal, rVal)
++		}
++
++	// JSON object
++	case map[string]interface{}:
++		lMap := fst.(map[string]interface{})
++		rMap := snd.(map[string]interface{})
++		if isRootObject && len(lMap)-len(additionalLocalAttributes) != len(rMap)-len(additionalRemoteAttributes) {
++			c.Errorf("got unexpected number of root object's attributes from snd inpect %q: %d != %d", name, len(lMap)-len(additionalLocalAttributes), len(rMap)-len(additionalRemoteAttributes))
++		} else if !isRootObject && len(lMap) != len(rMap) {
++			c.Errorf("map length differs between fst and snd for %q: %d != %d", name, len(lMap), len(rMap))
++		}
++		for key, lVal := range lMap {
++			itemName := fmt.Sprintf("%s.%s", name, key)
++			rVal, ok := rMap[key]
++			if ok {
++				compareInspectValues(c, itemName, lVal, rVal, localVsRemote)
++			} else if _, exists := additionalLocalAttributes[key]; !isRootObject || !localVsRemote || !exists {
++				c.Errorf("attribute %q present in fst but not in snd object", itemName)
++			}
++		}
++		for key := range rMap {
++			if _, ok := lMap[key]; !ok {
++				if _, exists := additionalRemoteAttributes[key]; !isRootObject || !localVsRemote || !exists {
++					c.Errorf("attribute \"%s.%s\" present in snd but not in fst object", name, key)
++				}
++			}
++		}
++
++	case nil:
++		if fst != snd {
++			c.Errorf("fst value differs from snd for %q: %v (%T) != %v (%T)", name, fst, fst, snd, snd)
++		}
++
++	default:
++		c.Fatalf("got unexpected type (%T) for %q", fst, name)
++	}
++}
++
++func apiCallInspectImage(c *check.C, d *Daemon, repoName string, remote, shouldFail bool) (value interface{}, status int, err error) {
++	suffix := ""
++	if remote {
++		suffix = "?remote=1"
++	}
++	endpoint := fmt.Sprintf("/v1.20/images/%s/json%s", repoName, suffix)
++	status, body, err := func() (int, []byte, error) {
++		if d == nil {
++			return sockRequest("GET", endpoint, nil)
++		}
++		return d.sockRequest("GET", endpoint, nil)
++	}()
++	if shouldFail {
++		c.Assert(status, check.Not(check.Equals), http.StatusOK)
++		if err == nil {
++			err = fmt.Errorf("%s", bytes.TrimSpace(body))
++		}
++	} else {
++		c.Assert(err, check.IsNil)
++		c.Assert(status, check.Equals, http.StatusOK)
++		if err = json.Unmarshal(body, &value); err != nil {
++			what := "local"
++			if remote {
++				what = "remote"
++			}
++			c.Fatalf("failed to parse result for %s image %q: %v", what, repoName, err)
++		}
++	}
++	return
++}
++
++func (s *DockerRegistrySuite) TestInspectApiRemoteImage(c *check.C) {
++	repoName := fmt.Sprintf("%v/dockercli/busybox", s.reg.url)
++	// tag the image and upload it to the private registry
++	dockerCmd(c, "tag", "busybox", repoName)
++	defer deleteImages(repoName)
++
++	dockerCmd(c, "push", repoName)
++	localValue, _, _ := apiCallInspectImage(c, nil, repoName, false, false)
++	remoteValue, _, _ := apiCallInspectImage(c, nil, repoName, true, false)
++	compareInspectValues(c, "a", localValue, remoteValue, true)
++
++	deleteImages(repoName)
++
++	// local inspect shall fail now
++	_, status, _ := apiCallInspectImage(c, nil, repoName, false, true)
++	c.Assert(status, check.Equals, http.StatusNotFound)
++
++	// remote inspect shall still succeed
++	remoteValue2, _, _ := apiCallInspectImage(c, nil, repoName, true, false)
++	compareInspectValues(c, "a", localValue, remoteValue2, true)
++}
++
++func (s *DockerRegistrySuite) TestInspectApiImageFromAdditionalRegistry(c *check.C) {
++	daemonArgs := []string{"--add-registry=" + s.reg.url}
++	if err := s.d.StartWithBusybox(daemonArgs...); err != nil {
++		c.Fatalf("we should have been able to start the daemon with passing { %s } flags: %v", strings.Join(daemonArgs, ", "), err)
++	}
++
++	repoName := fmt.Sprintf("dockercli/busybox")
++	fqn := s.reg.url + "/" + repoName
++	// tag the image and upload it to the private registry
++	if out, err := s.d.Cmd("tag", "busybox", fqn); err != nil {
++		c.Fatalf("image tagging failed: %s, %v", out, err)
++	}
++
++	localValue, _, _ := apiCallInspectImage(c, s.d, repoName, false, false)
++
++	_, status, _ := apiCallInspectImage(c, s.d, repoName, true, true)
++	c.Assert(status, check.Equals, http.StatusNotFound)
++
++	if out, err := s.d.Cmd("push", fqn); err != nil {
++		c.Fatalf("failed to push image %s: error %v, output %q", fqn, err, out)
++	}
++
++	remoteValue, _, _ := apiCallInspectImage(c, s.d, repoName, true, false)
++	compareInspectValues(c, "a", localValue, remoteValue, true)
++
++	if out, err := s.d.Cmd("rmi", fqn); err != nil {
++		c.Fatalf("failed to remove image %s: %s, %v", fqn, out, err)
++	}
++
++	remoteValue2, _, _ := apiCallInspectImage(c, s.d, fqn, true, false)
++	compareInspectValues(c, "a", localValue, remoteValue2, true)
++}
++
++func (s *DockerRegistrySuite) TestInspectApiNonExistentRepository(c *check.C) {
++	repoName := fmt.Sprintf("%s/foo/non-existent", s.reg.url)
++
++	_, status, err := apiCallInspectImage(c, nil, repoName, false, true)
++	c.Assert(status, check.Equals, http.StatusNotFound)
++	c.Assert(err, check.Not(check.IsNil))
++	c.Assert(err.Error(), check.Matches, `(?i)no such image.*`)
++
++	_, status, err = apiCallInspectImage(c, nil, repoName, true, true)
++	c.Assert(err, check.Not(check.IsNil))
++	c.Assert(err.Error(), check.Matches, `(?i).*(not found|no such image|no tags available|not known).*`)
++}
+diff --git a/integration-cli/docker_api_tag_list_test.go b/integration-cli/docker_api_tag_list_test.go
+new file mode 100644
+index 0000000..0e0859d
+--- /dev/null
++++ b/integration-cli/docker_api_tag_list_test.go
+@@ -0,0 +1,234 @@
++package main
++
++import (
++	"encoding/json"
++	"fmt"
++	"net/http"
++	"os"
++	"os/exec"
++	"path/filepath"
++	"strings"
++
++	"github.com/docker/docker/api/types"
++	"github.com/go-check/check"
++)
++
++func tagLinesEqual(expected, actual []string, allowEmptyImageID bool) bool {
++	if len(expected) != len(actual) {
++		return false
++	}
++	for i := range expected {
++		if i == 2 && actual[i] == "" && allowEmptyImageID {
++			continue
++		}
++		if expected[i] != actual[i] {
++			return false
++		}
++	}
++	return true
++}
++
++func dereferenceTagList(tagList []*types.RepositoryTag) []types.RepositoryTag {
++	res := make([]types.RepositoryTag, len(tagList))
++	for i, tag := range tagList {
++		res[i] = *tag
++	}
++	return res
++}
++
++func assertTagListEqual(c *check.C, d *Daemon, remote, allowEmptyImageID bool, name, expName string, expTagList []types.RepositoryTag) {
++	suffix := ""
++	if remote {
++		suffix = "?remote=1"
++	}
++	endpoint := fmt.Sprintf("/v1.20/images/%s/tags%s", name, suffix)
++	status, body, err := func() (int, []byte, error) {
++		if d == nil {
++			return sockRequest("GET", endpoint, nil)
++		}
++		return d.sockRequest("GET", endpoint, nil)
++	}()
++
++	c.Assert(status, check.Equals, http.StatusOK)
++	c.Assert(err, check.IsNil)
++
++	var tagList types.RepositoryTagList
++	if err = json.Unmarshal(body, &tagList); err != nil {
++		c.Fatalf("failed to parse tag list: %v", err)
++	}
++	if allowEmptyImageID {
++		for i, tag := range tagList.TagList {
++			if tag.ImageID == "" && i < len(expTagList) {
++				tag.ImageID = expTagList[i].ImageID
++			}
++		}
++	}
++	c.Assert(tagList.Name, check.Equals, expName)
++	c.Assert(dereferenceTagList(tagList.TagList), check.DeepEquals, expTagList)
++}
++
++func (s *DockerRegistriesSuite) TestTagApiListRemoteRepository(c *check.C) {
++	daemonArgs := []string{"--add-registry=" + s.reg2.url}
++	if err := s.d.StartWithBusybox(daemonArgs...); err != nil {
++		c.Fatalf("we should have been able to start the daemon with passing { %s } flags: %v", strings.Join(daemonArgs, ", "), err)
++	}
++
++	{ // load hello-world
++		bb := filepath.Join(s.d.folder, "hello-world.tar")
++		if _, err := os.Stat(bb); err != nil {
++			if !os.IsNotExist(err) {
++				c.Fatalf("unexpected error on hello-world.tar stat: %v", err)
++			}
++			// saving busybox image from main daemon
++			if err := exec.Command(dockerBinary, "save", "--output", bb, "hello-world:frozen").Run(); err != nil {
++				c.Fatalf("could not save hello-world:frozen image to %q: %v", bb, err)
++			}
++		}
++		// loading hello-world image to this daemon
++		if _, err := s.d.Cmd("load", "--input", bb); err != nil {
++			c.Fatalf("could not load hello-world image: %v", err)
++		}
++		if err := os.Remove(bb); err != nil {
++			s.d.c.Logf("could not remove %s: %v", bb, err)
++		}
++	}
++	busyboxID := s.d.getAndTestImageEntry(c, 2, "busybox", "").id
++	helloWorldID := s.d.getAndTestImageEntry(c, 2, "hello-world", "").id
++
++	for _, tag := range []string{"1.1-busy", "1.2-busy", "1.3-busy"} {
++		dest := s.reg1.url + "/foo/busybox:" + tag
++		if out, err := s.d.Cmd("tag", "busybox", dest); err != nil {
++			c.Fatalf("failed to tag image %q as %q: error %v, output %q", "busybox", dest, err, out)
++		}
++	}
++	for _, tag := range []string{"1.4-hell", "1.5-hell"} {
++		dest := s.reg1.url + "/foo/busybox:" + tag
++		if out, err := s.d.Cmd("tag", "hello-world:frozen", dest); err != nil {
++			c.Fatalf("failed to tag image %q as %q: error %v, output %q", "busybox", dest, err, out)
++		}
++	}
++	for _, tag := range []string{"2.1-busy", "2.2-busy", "2.3-busy"} {
++		dest := s.reg2.url + "/foo/busybox:" + tag
++		if out, err := s.d.Cmd("tag", "busybox", dest); err != nil {
++			c.Fatalf("failed to tag image %q as %q: error %v, output %q", "busybox", dest, err, out)
++		}
++	}
++	for _, tag := range []string{"2.4-hell", "2.5-hell"} {
++		dest := s.reg2.url + "/foo/busybox:" + tag
++		if out, err := s.d.Cmd("tag", "hello-world:frozen", dest); err != nil {
++			c.Fatalf("failed to tag image %q as %q: error %v, output %q", "busybox", dest, err, out)
++		}
++	}
++	localTags := []string{}
++	imgNames := []string{"busy", "hell"}
++	for ri, reg := range []*testRegistryV2{s.reg1, s.reg2} {
++		for i := 0; i < 5; i++ {
++			tag := fmt.Sprintf("%s/foo/busybox:%d.%d-%s", reg.url, ri+1, i+1, imgNames[i/3])
++			localTags = append(localTags, tag)
++			if (ri+i)%3 == 0 {
++				continue // upload 2/3 of registries
++			}
++			if out, err := s.d.Cmd("push", tag); err != nil {
++				c.Fatalf("push of %q should have succeeded: %v, output: %s", tag, err, out)
++			}
++		}
++	}
++
++	assertTagListEqual(c, s.d, true, true, s.reg1.url+"/foo/busybox", s.reg1.url+"/foo/busybox",
++		[]types.RepositoryTag{
++			{"1.2-busy", busyboxID},
++			{"1.3-busy", busyboxID},
++			{"1.5-hell", helloWorldID},
++		})
++
++	assertTagListEqual(c, s.d, true, true, s.reg2.url+"/foo/busybox", s.reg2.url+"/foo/busybox",
++		[]types.RepositoryTag{
++			{"2.1-busy", busyboxID},
++			{"2.2-busy", busyboxID},
++			{"2.4-hell", helloWorldID},
++			{"2.5-hell", helloWorldID},
++		})
++
++	assertTagListEqual(c, s.d, true, true, "foo/busybox", s.reg2.url+"/foo/busybox",
++		[]types.RepositoryTag{
++			{"2.1-busy", busyboxID},
++			{"2.2-busy", busyboxID},
++			{"2.4-hell", helloWorldID},
++			{"2.5-hell", helloWorldID},
++		})
++
++	assertTagListEqual(c, s.d, false, false, s.reg1.url+"/foo/busybox", s.reg1.url+"/foo/busybox",
++		[]types.RepositoryTag{
++			{"1.1-busy", busyboxID},
++			{"1.2-busy", busyboxID},
++			{"1.3-busy", busyboxID},
++			{"1.4-hell", helloWorldID},
++			{"1.5-hell", helloWorldID},
++		})
++
++	assertTagListEqual(c, s.d, false, false, s.reg2.url+"/foo/busybox", s.reg2.url+"/foo/busybox",
++		[]types.RepositoryTag{
++			{"2.1-busy", busyboxID},
++			{"2.2-busy", busyboxID},
++			{"2.3-busy", busyboxID},
++			{"2.4-hell", helloWorldID},
++			{"2.5-hell", helloWorldID},
++		})
++
++	// now delete all local images
++	if out, err := s.d.Cmd("rmi", localTags...); err != nil {
++		c.Fatalf("failed to remove images %v: %v, output: %s", localTags, err, out)
++	}
++
++	// and try again
++	assertTagListEqual(c, s.d, true, true, "foo/busybox", s.reg2.url+"/foo/busybox",
++		[]types.RepositoryTag{
++			{"2.1-busy", busyboxID},
++			{"2.2-busy", busyboxID},
++			{"2.4-hell", helloWorldID},
++			{"2.5-hell", helloWorldID},
++		})
++
++	assertTagListEqual(c, s.d, false, true, s.reg1.url+"/foo/busybox", s.reg1.url+"/foo/busybox",
++		[]types.RepositoryTag{
++			{"1.2-busy", busyboxID},
++			{"1.3-busy", busyboxID},
++			{"1.5-hell", helloWorldID},
++		})
++}
++
++func (s *DockerRegistrySuite) TestTagApiListNotExistentRepository(c *check.C) {
++	if err := s.d.StartWithBusybox(); err != nil {
++		c.Fatalf("we should have been able to start the daemon: %v", err)
++	}
++
++	busyboxID := s.d.getAndTestImageEntry(c, 1, "busybox", "").id
++
++	repoName := fmt.Sprintf("%s/foo/busybox", s.reg.url)
++	if out, err := s.d.Cmd("tag", "busybox", repoName); err != nil {
++		c.Fatalf("failed to tag image %q as %q: error %v, output %q", "busybox", repoName, err, out)
++	}
++	// list local tags
++	assertTagListEqual(c, s.d, false, false, repoName, repoName,
++		[]types.RepositoryTag{
++			{"latest", busyboxID},
++		})
++
++	// list remote tags - shall list nothing
++	endpoint := fmt.Sprintf("/v1.20/images/%s/tags?remote=1", repoName)
++	status, body, err := s.d.sockRequest("GET", endpoint, nil)
++
++	c.Assert(err, check.IsNil)
++	// Correct response status code is NotFound. However there's a bug in
++	// bundled registry code that returns OK with empty tag list when the
++	// registry does not exist.
++	if status != http.StatusNotFound && status != http.StatusOK {
++		c.Fatalf("got unexpected status code %d (not one of {%d, %d}", status, http.StatusNotFound, http.StatusOK)
++	}
++	var tagList types.RepositoryTagList
++	if status == http.StatusOK {
++		if err = json.Unmarshal(body, &tagList); err != nil {
++			c.Assert(tagList, check.Equals, types.RepositoryTagList{})
++		}
++	}
++}
+diff --git a/integration-cli/docker_utils.go b/integration-cli/docker_utils.go
+index 1f55584..b9a599a 100644
+--- a/integration-cli/docker_utils.go
++++ b/integration-cli/docker_utils.go
+@@ -504,7 +504,7 @@ func (d *Daemon) getImages(c *check.C, args ...string) map[string]*localImageEnt
+ 	reImageEntry := regexp.MustCompile(`(?m)^([[:alnum:]/.:_<>-]+)\s+([[:alnum:]._<>-]+)\s+((?:sha\d+:)?[a-fA-F0-9]+)\s+\S+\s+(.+)`)
+ 	result := make(map[string]*localImageEntry)
+ 
+-	out, err := d.Cmd("images", args...)
++	out, err := d.Cmd("images", append([]string{"--no-trunc"}, args...)...)
+ 	if err != nil {
+ 		c.Fatalf("failed to list images: %v", err)
+ 	}
+@@ -583,6 +583,77 @@ func (d *Daemon) inspectField(name, field string) (string, error) {
+ 	return strings.TrimSpace(out), nil
+ }
+ 
++func (d *Daemon) sockConn(timeout time.Duration) (net.Conn, error) {
++	daemon := d.sock()
++	daemonURL, err := url.Parse(daemon)
++	if err != nil {
++		return nil, fmt.Errorf("could not parse url %q: %v", daemon, err)
++	}
++
++	var c net.Conn
++	switch daemonURL.Scheme {
++	case "unix":
++		return net.DialTimeout(daemonURL.Scheme, daemonURL.Path, timeout)
++	case "tcp":
++		return net.DialTimeout(daemonURL.Scheme, daemonURL.Host, timeout)
++	default:
++		return c, fmt.Errorf("unknown scheme %v (%s)", daemonURL.Scheme, daemon)
++	}
++}
++
++func (d *Daemon) sockRequest(method, endpoint string, data interface{}) (int, []byte, error) {
++	jsonData := bytes.NewBuffer(nil)
++	if err := json.NewEncoder(jsonData).Encode(data); err != nil {
++		return -1, nil, err
++	}
++
++	res, body, err := d.sockRequestRaw(method, endpoint, jsonData, "application/json")
++	if err != nil {
++		return -1, nil, err
++	}
++	b, err := readBody(body)
++	return res.StatusCode, b, err
++}
++
++func (d *Daemon) sockRequestRaw(method, endpoint string, data io.Reader, ct string) (*http.Response, io.ReadCloser, error) {
++	req, client, err := d.newRequestClient(method, endpoint, data, ct)
++	if err != nil {
++		return nil, nil, err
++	}
++
++	resp, err := client.Do(req)
++	if err != nil {
++		client.Close()
++		return nil, nil, err
++	}
++	body := ioutils.NewReadCloserWrapper(resp.Body, func() error {
++		defer resp.Body.Close()
++		return client.Close()
++	})
++
++	return resp, body, nil
++}
++
++func (d *Daemon) newRequestClient(method, endpoint string, data io.Reader, ct string) (*http.Request, *httputil.ClientConn, error) {
++	c, err := d.sockConn(time.Duration(10 * time.Second))
++	if err != nil {
++		return nil, nil, fmt.Errorf("could not dial docker daemon: %v", err)
++	}
++
++	client := httputil.NewClientConn(c, nil)
++
++	req, err := http.NewRequest(method, endpoint, data)
++	if err != nil {
++		client.Close()
++		return nil, nil, fmt.Errorf("could not create new request: %v", err)
++	}
++
++	if ct != "" {
++		req.Header.Set("Content-Type", ct)
++	}
++	return req, client, nil
++}
++
+ func daemonHost() string {
+ 	daemonURLStr := "unix://" + opts.DefaultUnixSocket
+ 	if daemonHostVar := os.Getenv("DOCKER_HOST"); daemonHostVar != "" {

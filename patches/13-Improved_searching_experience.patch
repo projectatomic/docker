@@ -1,0 +1,791 @@
+diff --git a/api/client/client.go b/api/client/client.go
+index 5e737c2..256f58f 100644
+--- a/api/client/client.go
++++ b/api/client/client.go
+@@ -10,7 +10,7 @@ import (
+ 	"github.com/docker/docker/api/client/lib"
+ 	"github.com/docker/docker/api/types"
+ 	"github.com/docker/docker/api/types/filters"
+-	"github.com/docker/docker/api/types/registry"
++	"github.com/docker/docker/registry"
+ 	"github.com/docker/docker/runconfig"
+ )
+ 
+@@ -56,7 +56,7 @@ type apiClient interface {
+ 	ImagePull(options types.ImagePullOptions, privilegeFunc lib.RequestPrivilegeFunc) (io.ReadCloser, error)
+ 	ImagePush(options types.ImagePushOptions, privilegeFunc lib.RequestPrivilegeFunc) (io.ReadCloser, error)
+ 	ImageRemove(options types.ImageRemoveOptions) ([]types.ImageDelete, error)
+-	ImageSearch(options types.ImageSearchOptions, privilegeFunc lib.RequestPrivilegeFunc) ([]registry.SearchResult, error)
++	ImageSearch(options types.ImageSearchOptions, privilegeFunc lib.RequestPrivilegeFunc) ([]registry.SearchResultExt, error)
+ 	ImageSave(imageIDs []string) (io.ReadCloser, error)
+ 	ImageTag(options types.ImageTagOptions) error
+ 	Info() (types.Info, error)
+diff --git a/api/client/lib/image_search.go b/api/client/lib/image_search.go
+index 4e6bc7d..266263b 100644
+--- a/api/client/lib/image_search.go
++++ b/api/client/lib/image_search.go
+@@ -6,15 +6,18 @@ import (
+ 	"net/url"
+ 
+ 	"github.com/docker/docker/api/types"
+-	"github.com/docker/docker/api/types/registry"
++	"github.com/docker/docker/registry"
+ )
+ 
+ // ImageSearch makes the docker host to search by a term in a remote registry.
+ // The list of results is not sorted in any fashion.
+-func (cli *Client) ImageSearch(options types.ImageSearchOptions, privilegeFunc RequestPrivilegeFunc) ([]registry.SearchResult, error) {
+-	var results []registry.SearchResult
++func (cli *Client) ImageSearch(options types.ImageSearchOptions, privilegeFunc RequestPrivilegeFunc) ([]registry.SearchResultExt, error) {
++	var results []registry.SearchResultExt
+ 	query := url.Values{}
+ 	query.Set("term", options.Term)
++	if options.NoIndex {
++		query.Set("noIndex", "1")
++	}
+ 
+ 	resp, err := cli.tryImageSearch(query, options.RegistryAuth)
+ 	if resp.statusCode == http.StatusUnauthorized {
+diff --git a/api/client/search.go b/api/client/search.go
+index d627ef6..b8f8764 100644
+--- a/api/client/search.go
++++ b/api/client/search.go
+@@ -2,13 +2,12 @@ package client
+ 
+ import (
+ 	"fmt"
+-	"net/url"
+-	"sort"
++	"net"
++	"strconv"
+ 	"strings"
+ 	"text/tabwriter"
+ 
+ 	"github.com/docker/docker/api/types"
+-	registrytypes "github.com/docker/docker/api/types/registry"
+ 	Cli "github.com/docker/docker/cli"
+ 	flag "github.com/docker/docker/pkg/mflag"
+ 	"github.com/docker/docker/pkg/stringutils"
+@@ -21,6 +20,7 @@ import (
+ func (cli *DockerCli) CmdSearch(args ...string) error {
+ 	cmd := Cli.Subcmd("search", []string{"TERM"}, Cli.DockerCommands["search"].Description, true)
+ 	noTrunc := cmd.Bool([]string{"-no-trunc"}, false, "Don't truncate output")
++	noIndex := cmd.Bool([]string{"#noindex", "-no-index"}, false, "Don't prepend index to output")
+ 	automated := cmd.Bool([]string{"-automated"}, false, "Only show automated builds")
+ 	stars := cmd.Uint([]string{"s", "-stars"}, 0, "Only displays with at least x stars")
+ 	cmd.Require(flag.Exact, 1)
+@@ -28,8 +28,6 @@ func (cli *DockerCli) CmdSearch(args ...string) error {
+ 	cmd.ParseFlags(args, true)
+ 
+ 	name := cmd.Arg(0)
+-	v := url.Values{}
+-	v.Set("term", name)
+ 
+ 	indexInfo, err := registry.ParseSearchIndexInfo(name)
+ 	if err != nil {
+@@ -47,45 +45,58 @@ func (cli *DockerCli) CmdSearch(args ...string) error {
+ 	options := types.ImageSearchOptions{
+ 		Term:         name,
+ 		RegistryAuth: encodedAuth,
++		NoIndex:      *noIndex,
+ 	}
+ 
+-	unorderedResults, err := cli.client.ImageSearch(options, requestPrivilege)
++	results, err := cli.client.ImageSearch(options, requestPrivilege)
+ 	if err != nil {
+ 		return err
+ 	}
+ 
+-	results := searchResultsByStars(unorderedResults)
+-	sort.Sort(results)
+-
+ 	w := tabwriter.NewWriter(cli.out, 10, 1, 3, ' ', 0)
+-	fmt.Fprintf(w, "NAME\tDESCRIPTION\tSTARS\tOFFICIAL\tAUTOMATED\n")
++	if *noIndex {
++		fmt.Fprintf(w, "NAME\tDESCRIPTION\tSTARS\tOFFICIAL\tAUTOMATED\n")
++	} else {
++		fmt.Fprintf(w, "INDEX\tNAME\tDESCRIPTION\tSTARS\tOFFICIAL\tAUTOMATED\n")
++	}
+ 	for _, res := range results {
+ 		if (*automated && !res.IsAutomated) || (int(*stars) > res.StarCount) {
+ 			continue
+ 		}
++		row := []string{}
++		if !*noIndex {
++			indexName := res.IndexName
++			if !*noTrunc {
++				// Shorten index name to DOMAIN.TLD unless --no-trunc is given.
++				if host, _, err := net.SplitHostPort(indexName); err == nil {
++					indexName = host
++				}
++				// do not shorten ip address
++				if net.ParseIP(indexName) == nil {
++					// shorten index name just to the last 2 components (`DOMAIN.TLD`)
++					indexNameSubStrings := strings.Split(indexName, ".")
++					if len(indexNameSubStrings) > 2 {
++						indexName = strings.Join(indexNameSubStrings[len(indexNameSubStrings)-2:], ".")
++					}
++				}
++			}
++			row = append(row, indexName)
++		}
++
+ 		desc := strings.Replace(res.Description, "\n", " ", -1)
+ 		desc = strings.Replace(desc, "\r", " ", -1)
+ 		if !*noTrunc && len(desc) > 45 {
+ 			desc = stringutils.Truncate(desc, 42) + "..."
+ 		}
+-		fmt.Fprintf(w, "%s\t%s\t%d\t", res.Name, desc, res.StarCount)
++		row = append(row, res.RegistryName+"/"+res.Name, desc, strconv.Itoa(res.StarCount), "", "")
+ 		if res.IsOfficial {
+-			fmt.Fprint(w, "[OK]")
+-
++			row[len(row)-2] = "[OK]"
+ 		}
+-		fmt.Fprint(w, "\t")
+ 		if res.IsAutomated || res.IsTrusted {
+-			fmt.Fprint(w, "[OK]")
++			row[len(row)-1] = "[OK]"
+ 		}
+-		fmt.Fprint(w, "\n")
++		fmt.Fprintf(w, "%s\n", strings.Join(row, "\t"))
+ 	}
+ 	w.Flush()
+ 	return nil
+ }
+-
+-// SearchResultsByStars sorts search results in descending order by number of stars.
+-type searchResultsByStars []registrytypes.SearchResult
+-
+-func (r searchResultsByStars) Len() int           { return len(r) }
+-func (r searchResultsByStars) Swap(i, j int)      { r[i], r[j] = r[j], r[i] }
+-func (r searchResultsByStars) Less(i, j int) bool { return r[j].StarCount < r[i].StarCount }
+diff --git a/api/server/router/local/image.go b/api/server/router/local/image.go
+index 2af297a..0d2d18c 100644
+--- a/api/server/router/local/image.go
++++ b/api/server/router/local/image.go
+@@ -674,9 +674,9 @@ func (s *router) getImagesSearch(ctx context.Context, w http.ResponseWriter, r *
+ 			headers[k] = v
+ 		}
+ 	}
+-	query, err := s.daemon.SearchRegistryForImages(r.Form.Get("term"), config, headers)
++	results, err := s.daemon.SearchRegistryForImages(r.Form.Get("term"), config, headers, httputils.BoolValue(r, "noIndex"))
+ 	if err != nil {
+ 		return err
+ 	}
+-	return httputils.WriteJSON(w, http.StatusOK, query.Results)
++	return httputils.WriteJSON(w, http.StatusOK, results)
+ }
+diff --git a/api/types/client.go b/api/types/client.go
+index c600b90..b8ebba1 100644
+--- a/api/types/client.go
++++ b/api/types/client.go
+@@ -202,6 +202,7 @@ type ImageRemoveOptions struct {
+ type ImageSearchOptions struct {
+ 	Term         string
+ 	RegistryAuth string
++	NoIndex      bool
+ }
+ 
+ // ImageTagOptions holds parameters to tag an image
+diff --git a/daemon/daemon.go b/daemon/daemon.go
+index 924a9e9..6c4a3b6 100644
+--- a/daemon/daemon.go
++++ b/daemon/daemon.go
+@@ -24,7 +24,6 @@ import (
+ 	"github.com/docker/docker/api"
+ 	"github.com/docker/docker/api/types"
+ 	"github.com/docker/docker/api/types/filters"
+-	registrytypes "github.com/docker/docker/api/types/registry"
+ 	"github.com/docker/docker/container"
+ 	"github.com/docker/docker/daemon/events"
+ 	"github.com/docker/docker/daemon/exec"
+@@ -1571,8 +1570,8 @@ func (daemon *Daemon) AuthenticateToRegistry(authConfig *types.AuthConfig) (stri
+ // term. authConfig is used to login.
+ func (daemon *Daemon) SearchRegistryForImages(term string,
+ 	authConfig *types.AuthConfig,
+-	headers map[string][]string) (*registrytypes.SearchResults, error) {
+-	return daemon.RegistryService.Search(term, authConfig, headers)
++	headers map[string][]string, noIndex bool) ([]registry.SearchResultExt, error) {
++	return daemon.RegistryService.Search(term, authConfig, headers, noIndex)
+ }
+ 
+ // IsShuttingDown tells whether the daemon is shutting down or not
+diff --git a/docs/reference/api/docker_remote_api_v1.18.md b/docs/reference/api/docker_remote_api_v1.18.md
+index 0ed2adf..6876598 100644
+--- a/docs/reference/api/docker_remote_api_v1.18.md
++++ b/docs/reference/api/docker_remote_api_v1.18.md
+@@ -1481,23 +1481,29 @@ Search for an image on [Docker Hub](https://hub.docker.com).
+         [
+                 {
+                     "description": "",
++                    "index_name" : "docker.io"
+                     "is_official": false,
+                     "is_automated": false,
+                     "name": "wma55/u1210sshd",
++                    "registry_name" : "docker.io",
+                     "star_count": 0
+                 },
+                 {
+                     "description": "",
++                    "index_name" : "docker.io"
+                     "is_official": false,
+                     "is_automated": false,
+                     "name": "jdswinbank/sshd",
++                    "registry_name" : "docker.io",
+                     "star_count": 0
+                 },
+                 {
+                     "description": "",
++                    "index_name" : "docker.io"
+                     "is_official": false,
+                     "is_automated": false,
+                     "name": "vgauthier/sshd",
++                    "registry_name" : "docker.io",
+                     "star_count": 0
+                 }
+         ...
+@@ -1506,6 +1512,7 @@ Search for an image on [Docker Hub](https://hub.docker.com).
+ Query Parameters:
+ 
+ -   **term** – term to search
++-   **noIndex** - whether to include `index_name` in result respons and sort results with it
+ 
+ Status Codes:
+ 
+diff --git a/man/docker-search.1.md b/man/docker-search.1.md
+index 0b205f4..d9f3cc3 100644
+--- a/man/docker-search.1.md
++++ b/man/docker-search.1.md
+@@ -25,7 +25,11 @@ of stars awarded, whether the image is official, and whether it is automated.
+    Only show automated builds. The default is *false*.
+ 
+ **--help**
+-  Print usage statement
++   Print usage statement
++
++**--no-index**=*true*|*false*
++   Do not include index name in output. Sort results primarily by registry
++   name.
+ 
+ **--no-trunc**=*true*|*false*
+    Don't truncate output. The default is *false*.
+@@ -41,11 +45,11 @@ Search a registry for the term 'fedora' and only display those images
+ ranked 3 or higher:
+ 
+     $ docker search -s 3 fedora
+-    NAME                  DESCRIPTION                                    STARS OFFICIAL  AUTOMATED
+-    mattdm/fedora         A basic Fedora image corresponding roughly...  50
+-    fedora                (Semi) Official Fedora base image.             38
+-    mattdm/fedora-small   A small Fedora image on which to build. Co...  8
+-    goldmann/wildfly      A WildFly application server running on a ...  3               [OK]
++    INDEX      NAME                            DESCRIPTION                                    STARS OFFICIAL  AUTOMATED
++    docker.io  docker.io/mattdm/fedora         A basic Fedora image corresponding roughly...  50
++    docker.io  docker.io/fedora                (Semi) Official Fedora base image.             38
++    docker.io  docker.io/mattdm/fedora-small   A small Fedora image on which to build. Co...  8
++    docker.io  docker.io/goldmann/wildfly      A WildFly application server running on a ...  3               [OK]
+ 
+ ## Search Docker Hub for automated images
+ 
+@@ -53,9 +57,9 @@ Search Docker Hub for the term 'fedora' and only display automated images
+ ranked 1 or higher:
+ 
+     $ docker search --automated -s 1 fedora
+-    NAME               DESCRIPTION                                     STARS OFFICIAL  AUTOMATED
+-    goldmann/wildfly   A WildFly application server running on a ...   3               [OK]
+-    tutum/fedora-20    Fedora 20 image with SSH access. For the r...   1               [OK]
++    INDEX      NAME                         DESCRIPTION                                     STARS OFFICIAL  AUTOMATED
++    docker.io  docker.io/goldmann/wildfly   A WildFly application server running on a ...   3               [OK]
++    docker.io  docker.io/tutum/fedora-20    Fedora 20 image with SSH access. For the r...   1               [OK]
+ 
+ # HISTORY
+ April 2014, Originally compiled by William Henry (whenry at redhat dot com)
+diff --git a/registry/config.go b/registry/config.go
+index f8e80fb..e5cc3c5 100644
+--- a/registry/config.go
++++ b/registry/config.go
+@@ -437,7 +437,7 @@ func ParseRepositoryInfo(reposName reference.Named) (*RepositoryInfo, error) {
+ 
+ // ParseSearchIndexInfo will use repository name to get back an indexInfo.
+ func ParseSearchIndexInfo(reposName string) (*registrytypes.IndexInfo, error) {
+-	indexName, _ := splitReposSearchTerm(reposName)
++	indexName, _ := splitReposSearchTerm(reposName, true)
+ 
+ 	indexInfo, err := newIndexInfo(emptyServiceConfig, indexName)
+ 	if err != nil {
+diff --git a/registry/registry_test.go b/registry/registry_test.go
+index b21d6c1..7fa3dd9 100644
+--- a/registry/registry_test.go
++++ b/registry/registry_test.go
+@@ -1011,3 +1011,154 @@ func (tr debugTransport) RoundTrip(req *http.Request) (*http.Response, error) {
+ 	tr.log(string(dump))
+ 	return resp, err
+ }
++
++var sortSearchResultsCases = []SearchResultExt{
++	{"docker.io", "isv.company.ltd", 10, false, "misc/image", false, false, "Some custom image."},
++	{"docker.io", "isv.company.ltd", 10, false, "custom/image", false, true, "Some custom image."},
++	{"index.company.ltd", "registry.stage.company.ltd", 6, false, "centos", true, false, "Another CentOS"},
++	{"docker.io", "docker.io", 5, false, "custom/image", false, true, "Some custom image from docker registry."},
++	{"127.0.0.1:5000", "127.0.0.1:5000", 0, false, "custom/image", false, false, "Image from private repo."},
++	{"docker.io", "registry.company.ltd", 0, false, "centos", true, true, "Second hand CentOS"},
++	{"docker.io", "docker.io", 0, false, "user/app", false, false, "Some user app."},
++	{"docker.io", "docker.io", 5, false, "user/app1", false, true, "Some user app."},
++	{"docker.io", "docker.io", 2, false, "user/app2", false, false, "Some user app."},
++	{"127.0.0.1:5000", "isv.company.ltd", 11, false, "custom/image", false, true, "Image from private repo."},
++	{"docker.io", "docker.io", 3, false, "user/app3", false, false, "Some user app."},
++	{"index.company.ltd", "registry.company.ltd", 11, false, "centos", true, true, "CentOS."},
++	{"docker.io", "docker.io", 0, true, "fedora/apache", true, false, "Official apache"},
++	{"docker.io", "registry.stage.company.ltd", 11, false, "centos", true, true, "CentOS from another registry."},
++	{"docker.io", "isv.another.comp.ltd", 9, false, "custom/image", false, false, "Custom image."},
++	{"index.company.ltd", "isv.company.ltd", 10, false, "custom/image", false, true, "Some custom image."},
++	{"index.company.ltd", "isv.company.ltd", 11, false, "custom/image", false, false, "Some custom image."},
++	{"127.0.0.1:5000", "127.0.0.1:5000", 0, false, "centos", false, true, "CentOS from private repo."},
++	{"127.0.0.1:5000", "docker.io", 0, false, "user/app2", false, false, "User app from private registry."},
++}
++
++// `sortedEntriesMapping` maps new position in the list to original one after
++// the sort. `duplicates` is a list of duplicate entries that should be removed
++// after the call to `removeSearchDuplicates`. May be null if sorting with
++// index.
++func doTestSortSearchResults(t *testing.T, withIndex bool, sortedEntriesMapping map[int]int, duplicates []int) {
++	cases := make([]SearchResultExt, len(sortSearchResultsCases))
++	for i := range sortSearchResultsCases {
++		cases[i] = sortSearchResultsCases[i]
++	}
++	by(getSearchResultsCmpFunc(withIndex)).Sort(cases)
++
++	for i, entry := range sortSearchResultsCases {
++		if newPos, ok := sortedEntriesMapping[i]; !ok {
++			t.Fatalf("sortedEntriesMapping is incomplete (%d index is missing)", i)
++		} else if newPos > len(cases) {
++			t.Fatalf("expected position for entry %d is out of range (%d >= %d)", i, newPos, len(cases))
++		}
++		if cases[sortedEntriesMapping[i]] != entry {
++			j := 0
++			for ; j < len(cases); j++ {
++				if cases[j] == entry {
++					break
++				}
++			}
++			if j >= len(sortSearchResultsCases) {
++				t.Fatalf("sortedEntriesMapping is incomplete")
++			}
++			t.Errorf("Sort failed, item %v (orig. pos=%d) expected on position %d, not %d.", entry, i, sortedEntriesMapping[i], j)
++		}
++	}
++
++	if !withIndex {
++		cases := removeSearchDuplicates(cases)
++		if len(cases) != len(sortSearchResultsCases)-len(duplicates) {
++			t.Errorf("Expected %d items in output table after removing duplicates, not %d.",
++				len(sortSearchResultsCases)-len(duplicates), len(cases))
++		}
++
++		for i, entry := range sortSearchResultsCases {
++			isRedundant := false
++			for j := range duplicates {
++				if i == duplicates[j] {
++					isRedundant = true
++					break
++				}
++			}
++			found := false
++			j := 0
++			for ; j < len(cases); j++ {
++				if entry == cases[j] {
++					found = true
++					break
++				}
++			}
++			if found && isRedundant {
++				t.Errorf("Entry %v (orig. pos=%d, new pos=%d) is redundant and should have been removed.", entry, i, j)
++			} else if !found && !isRedundant {
++				t.Errorf("Entry %v (orig. pos=%d) should have stayed in cases results.", entry, i)
++			}
++		}
++	}
++}
++
++func TestSortSearchResultsWithIndex(t *testing.T) {
++	sortedEntriesMapping := map[int]int{
++		0:  6,
++		1:  5,
++		2:  18,
++		3:  8,
++		4:  2,
++		5:  14,
++		6:  13,
++		7:  9,
++		8:  11,
++		9:  0,
++		10: 10,
++		11: 16,
++		12: 12,
++		13: 4,
++		14: 7,
++		15: 17,
++		16: 15,
++		17: 1,
++		18: 3,
++	}
++
++	// Should have not effect.
++	RegistryList = append([]string{"index.company.ltd"}, RegistryList...)
++	defer func() {
++		RegistryList = []string{IndexName}
++	}()
++
++	doTestSortSearchResults(t, true, sortedEntriesMapping, nil)
++}
++
++func TestSortSearchResultsWithoutIndex(t *testing.T) {
++	sortedEntriesMapping := map[int]int{
++		0:  14,
++		1:  13, // duplicate with 9, 15, 16
++		2:  18, // duplicate with 13
++		3:  2,
++		4:  1,
++		5:  16, // duplicate with 11
++		6:  7,
++		7:  3,
++		8:  5,
++		9:  10, // duplicate with 1, 15, 16
++		10: 4,
++		11: 15, // duplicate with 5
++		12: 6,
++		13: 17, //duplicate with 2
++		14: 9,
++		15: 12, // duplicate with 1, 9, 16
++		16: 11, // duplicate with 1, 9, 15
++		17: 0,
++		18: 8,
++	}
++
++	duplicates := []int{1, 5, 9, 13, 15}
++
++	// Duplicates having index nearest the first item in this list should have higher preference.
++	RegistryList = append([]string{"index.company.ltd"}, RegistryList...)
++	defer func() {
++		RegistryList = []string{IndexName}
++	}()
++
++	doTestSortSearchResults(t, false, sortedEntriesMapping, duplicates)
++}
+diff --git a/registry/service.go b/registry/service.go
+index 6eab776..09e65bf 100644
+--- a/registry/service.go
++++ b/registry/service.go
+@@ -5,8 +5,10 @@ import (
+ 	"fmt"
+ 	"net/http"
+ 	"net/url"
++	"sort"
+ 	"strings"
+ 
++	"github.com/Sirupsen/logrus"
+ 	"github.com/docker/distribution/reference"
+ 	"github.com/docker/distribution/registry/client/auth"
+ 	"github.com/docker/docker/api/types"
+@@ -58,48 +60,90 @@ func (s *Service) Auth(authConfig *types.AuthConfig) (string, error) {
+ 	return Login(authConfig, endpoint)
+ }
+ 
+-// splitReposSearchTerm breaks a search term into an index name and remote name
+-func splitReposSearchTerm(reposName string) (string, string) {
+-	nameParts := strings.SplitN(reposName, "/", 2)
+-	var indexName, remoteName string
+-	if len(nameParts) == 1 || (!strings.Contains(nameParts[0], ".") &&
+-		!strings.Contains(nameParts[0], ":") && nameParts[0] != "localhost") {
+-		// This is a Docker Index repos (ex: samalba/hipache or ubuntu)
+-		// 'docker.io'
+-		indexName = IndexName
+-		remoteName = reposName
+-	} else {
+-		indexName = nameParts[0]
+-		remoteName = nameParts[1]
++type by func(fst, snd *SearchResultExt) bool
++
++type searchResultSorter struct {
++	Results []SearchResultExt
++	By      func(fst, snd *SearchResultExt) bool
++}
++
++func (by by) Sort(results []SearchResultExt) {
++	rs := &searchResultSorter{
++		Results: results,
++		By:      by,
+ 	}
+-	return indexName, remoteName
++	sort.Sort(rs)
++}
++
++func (s *searchResultSorter) Swap(i, j int) {
++	s.Results[i], s.Results[j] = s.Results[j], s.Results[i]
++}
++
++func (s *searchResultSorter) Less(i, j int) bool {
++	return s.By(&s.Results[i], &s.Results[j])
++}
++
++// Factory for search result comparison function. Either it takes index name
++// into consideration or not.
++func getSearchResultsCmpFunc(withIndex bool) by {
++	// Compare two items in the result table of search command. First compare
++	// the index we found the result in. Second compare their rating. Then
++	// compare their fully qualified name (registry/name).
++	less := func(fst, snd *SearchResultExt) bool {
++		if withIndex {
++			if fst.IndexName != snd.IndexName {
++				return fst.IndexName < snd.IndexName
++			}
++			if fst.StarCount != snd.StarCount {
++				return fst.StarCount > snd.StarCount
++			}
++		}
++		if fst.RegistryName != snd.RegistryName {
++			return fst.RegistryName < snd.RegistryName
++		}
++		if !withIndex {
++			if fst.StarCount != snd.StarCount {
++				return fst.StarCount > snd.StarCount
++			}
++		}
++		if fst.Name != snd.Name {
++			return fst.Name < snd.Name
++		}
++		return fst.Description < snd.Description
++	}
++	return less
++}
++
++func (s *searchResultSorter) Len() int {
++	return len(s.Results)
+ }
+ 
+ // Search queries the public registry for images matching the specified
+ // search terms, and returns the results.
+-func (s *Service) Search(term string, authConfig *types.AuthConfig, headers map[string][]string) (*registrytypes.SearchResults, error) {
++func (s *Service) searchTerm(term string, authConfig *types.AuthConfig, headers map[string][]string, noIndex bool, outs *[]SearchResultExt) error {
+ 	if err := validateNoSchema(term); err != nil {
+-		return nil, err
++		return err
+ 	}
+ 
+-	indexName, remoteName := splitReposSearchTerm(term)
++	indexName, remoteName := splitReposSearchTerm(term, true)
+ 
+ 	index, err := newIndexInfo(s.Config, indexName)
+ 	if err != nil {
+-		return nil, err
++		return err
+ 	}
+ 
+ 	// *TODO: Search multiple indexes.
+ 	endpoint, err := NewEndpoint(index, http.Header(headers), APIVersionUnknown)
+ 	if err != nil {
+-		return nil, err
++		return err
+ 	}
+ 
+ 	r, err := NewSession(endpoint.client, authConfig, endpoint)
+ 	if err != nil {
+-		return nil, err
++		return err
+ 	}
+ 
++	var results *registrytypes.SearchResults
+ 	if index.Official {
+ 		localName := remoteName
+ 		if strings.HasPrefix(localName, OfficialReposNamePrefix) {
+@@ -107,9 +151,157 @@ func (s *Service) Search(term string, authConfig *types.AuthConfig, headers map[
+ 			localName = strings.SplitN(localName, "/", 2)[1]
+ 		}
+ 
+-		return r.SearchRepositories(localName)
++		results, err = r.SearchRepositories(localName)
++	} else {
++		results, err = r.SearchRepositories(remoteName)
++	}
++	if err != nil || results.NumResults < 1 {
++		return err
++	}
++
++	newOuts := make([]SearchResultExt, len(*outs)+len(results.Results))
++	for i := range *outs {
++		newOuts[i] = (*outs)[i]
+ 	}
+-	return r.SearchRepositories(remoteName)
++	for i, result := range results.Results {
++		item := SearchResultExt{
++			IndexName:    index.Name,
++			RegistryName: index.Name,
++			StarCount:    result.StarCount,
++			Name:         result.Name,
++			IsOfficial:   result.IsOfficial,
++			IsTrusted:    result.IsTrusted,
++			IsAutomated:  result.IsAutomated,
++			Description:  result.Description,
++		}
++		// Check if search result is fully qualified with registry
++		// If not, assume REGISTRY = INDEX
++		newRegistryName, newName := splitReposSearchTerm(result.Name, false)
++		if newRegistryName != "" {
++			item.RegistryName, item.Name = newRegistryName, newName
++		}
++		newOuts[len(*outs)+i] = item
++	}
++	*outs = newOuts
++	return nil
++}
++
++// Duplicate entries may occur in result table when omitting index from output because
++// different indexes may refer to same registries.
++func removeSearchDuplicates(data []SearchResultExt) []SearchResultExt {
++	var (
++		prevIndex = 0
++		res       []SearchResultExt
++	)
++
++	if len(data) > 0 {
++		res = []SearchResultExt{data[0]}
++	}
++	for i := 1; i < len(data); i++ {
++		prev := res[prevIndex]
++		curr := data[i]
++		if prev.RegistryName == curr.RegistryName && prev.Name == curr.Name {
++			// Repositories are equal, delete one of them.
++			// Find out whose index has higher priority (the lower the number
++			// the higher the priority).
++			var prioPrev, prioCurr int
++			for prioPrev = 0; prioPrev < len(RegistryList); prioPrev++ {
++				if prev.IndexName == RegistryList[prioPrev] {
++					break
++				}
++			}
++			for prioCurr = 0; prioCurr < len(RegistryList); prioCurr++ {
++				if curr.IndexName == RegistryList[prioCurr] {
++					break
++				}
++			}
++			if prioPrev > prioCurr || (prioPrev == prioCurr && prev.StarCount < curr.StarCount) {
++				// replace previous entry with current one
++				res[prevIndex] = curr
++			} // otherwise keep previous entry
++		} else {
++			prevIndex++
++			res = append(res, curr)
++		}
++	}
++	return res
++}
++
++// Search queries several registries for images matching the specified
++// search terms, and returns the results.
++func (s *Service) Search(term string, authConfig *types.AuthConfig, headers map[string][]string, noIndex bool) ([]SearchResultExt, error) {
++	results := []SearchResultExt{}
++	cmpFunc := getSearchResultsCmpFunc(!noIndex)
++
++	// helper for concurrent queries
++	searchRoutine := func(term string, c chan<- error) {
++		err := s.searchTerm(term, authConfig, headers, noIndex, &results)
++		c <- err
++	}
++
++	if isReposSearchTermFullyQualified(term) {
++		if err := s.searchTerm(term, authConfig, headers, noIndex, &results); err != nil {
++			return nil, err
++		}
++	} else if len(RegistryList) < 1 {
++		return nil, fmt.Errorf("No configured repository to search.")
++	} else {
++		var (
++			err              error
++			successfulSearch = false
++			resultChan       = make(chan error)
++		)
++		// query all registries in parallel
++		for i, r := range RegistryList {
++			tmp := term
++			if i > 0 {
++				tmp = fmt.Sprintf("%s/%s", r, term)
++			}
++			go searchRoutine(tmp, resultChan)
++		}
++		for range RegistryList {
++			err = <-resultChan
++			if err == nil {
++				successfulSearch = true
++			} else {
++				logrus.Errorf("%s", err.Error())
++			}
++		}
++		if !successfulSearch {
++			return nil, err
++		}
++	}
++	by(cmpFunc).Sort(results)
++	if noIndex {
++		results = removeSearchDuplicates(results)
++	}
++	return results, nil
++}
++
++// splitReposSearchTerm breaks a search term into an index name and remote name
++func splitReposSearchTerm(reposName string, fixMissingIndex bool) (string, string) {
++	nameParts := strings.SplitN(reposName, "/", 2)
++	var indexName, remoteName string
++	if len(nameParts) == 1 || (!strings.Contains(nameParts[0], ".") &&
++		!strings.Contains(nameParts[0], ":") && nameParts[0] != "localhost") {
++		// This is a Docker Index repos (ex: samalba/hipache or ubuntu)
++		// 'docker.io'
++		if fixMissingIndex {
++			indexName = IndexServerName()
++		} else {
++			indexName = ""
++		}
++		remoteName = reposName
++	} else {
++		indexName = nameParts[0]
++		remoteName = nameParts[1]
++	}
++	return indexName, remoteName
++}
++
++func isReposSearchTermFullyQualified(term string) bool {
++	indexName, _ := splitReposSearchTerm(term, false)
++	return indexName != ""
+ }
+ 
+ // ResolveRepository splits a repository name into its components
+diff --git a/registry/types.go b/registry/types.go
+index 0365782..63c8615 100644
+--- a/registry/types.go
++++ b/registry/types.go
+@@ -76,3 +76,26 @@ type RepositoryInfo struct {
+ 	// contain a '/' (e.g. "foo"), then it is considered an official repo.
+ 	Official bool
+ }
++
++// SearchResultExt describes a search result returned from a registry extended for
++// IndexName and RegistryName.
++// GET "/images/search"
++type SearchResultExt struct {
++	// IndexName is a name of index server providing the data below.
++	IndexName string `json:"index_name"`
++	// RegistryName is a registry name part of the Name. If the Name is not fully
++	// qualified, it will be set to IndexName.
++	RegistryName string `json:"registry_name"`
++	// StarCount indicates the number of stars this repository has
++	StarCount int `json:"star_count"`
++	// IsOfficial indicates whether the result is an official repository or not
++	IsOfficial bool `json:"is_official"`
++	// Name is the name of the repository
++	Name string `json:"name"`
++	// IsOfficial indicates whether the result is trusted
++	IsTrusted bool `json:"is_trusted"`
++	// IsAutomated indicates whether the result is automated
++	IsAutomated bool `json:"is_automated"`
++	// Description is a textual description of the repository
++	Description string `json:"description"`
++}
