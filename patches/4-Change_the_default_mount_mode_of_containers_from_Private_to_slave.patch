@@ -1,0 +1,13 @@
+diff --git a/daemon/execdriver/driver_unix.go b/daemon/execdriver/driver_unix.go
+index 1a72fd1..81c9f77 100644
+--- a/daemon/execdriver/driver_unix.go
++++ b/daemon/execdriver/driver_unix.go
+@@ -143,7 +143,7 @@ func InitContainer(c *Command) *configs.Config {
+ 	container.Readonlyfs = c.ReadonlyRootfs
+ 	// This can be overridden later by driver during mount setup based
+ 	// on volume options
+-	SetRootPropagation(container, mount.RPRIVATE)
++	SetRootPropagation(container, mount.RSLAVE)
+ 
+ 	// check to see if we are running in ramdisk to disable pivot root
+ 	container.NoPivotRoot = os.Getenv("DOCKER_RAMDISK") != ""

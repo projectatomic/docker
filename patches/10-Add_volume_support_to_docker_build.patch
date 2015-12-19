@@ -1,0 +1,363 @@
+diff --git a/api/client/build.go b/api/client/build.go
+index d0930e1..47c5689 100644
+--- a/api/client/build.go
++++ b/api/client/build.go
+@@ -32,6 +32,7 @@ import (
+ 	"github.com/docker/docker/registry"
+ 	tagpkg "github.com/docker/docker/tag"
+ 	"github.com/docker/docker/utils"
++	"github.com/docker/docker/volume"
+ 	"github.com/docker/go-units"
+ )
+ 
+@@ -63,6 +64,9 @@ func (cli *DockerCli) CmdBuild(args ...string) error {
+ 	cmd.Var(&flBuildArg, []string{"-build-arg"}, "Set build-time variables")
+ 	isolation := cmd.String([]string{"-isolation"}, "", "Container isolation level")
+ 
++	flBuildVolumes := opts.NewListOpts(nil)
++	cmd.Var(&flBuildVolumes, []string{"v", "-volume"}, "Set build-time bind mounts")
++
+ 	ulimits := make(map[string]*ulimit.Ulimit)
+ 	flUlimits := opts.NewUlimitOpt(&ulimits)
+ 	cmd.Var(flUlimits, []string{"-ulimit"}, "Ulimit options")
+@@ -202,6 +206,21 @@ func (cli *DockerCli) CmdBuild(args ...string) error {
+ 		remoteContext = cmd.Arg(0)
+ 	}
+ 
++	var binds []string
++	// add any bind targets to the list of container volumes
++	for bind := range flBuildVolumes.GetMap() {
++		if arr := volume.SplitN(bind, 2); len(arr) > 1 {
++			// after creating the bind mount we want to delete it from the flBuildVolumes values because
++			// we do not want bind mounts being committed to image configs
++			binds = append(binds, bind)
++			flBuildVolumes.Delete(bind)
++		}
++	}
++
++	if len(flBuildVolumes.GetMap()) > 0 {
++		return fmt.Errorf("Volumes aren't supported in docker build. Please use only bind mounts.")
++	}
++
+ 	options := types.ImageBuildOptions{
+ 		Context:        body,
+ 		Memory:         memory,
+@@ -225,6 +244,7 @@ func (cli *DockerCli) CmdBuild(args ...string) error {
+ 		Ulimits:        flUlimits.GetList(),
+ 		BuildArgs:      flBuildArg.GetAll(),
+ 		AuthConfigs:    cli.configFile.AuthConfigs,
++		Binds:          binds,
+ 	}
+ 
+ 	response, err := cli.client.ImageBuild(options)
+diff --git a/api/client/lib/image_build.go b/api/client/lib/image_build.go
+index ffe8b42..be3a6a0 100644
+--- a/api/client/lib/image_build.go
++++ b/api/client/lib/image_build.go
+@@ -108,6 +108,12 @@ func imageBuildOptionsToQuery(options types.ImageBuildOptions) (url.Values, erro
+ 	}
+ 	query.Set("buildargs", string(buildArgsJSON))
+ 
++	buildBindsJSON, err := json.Marshal(options.Binds)
++	if err != nil {
++		return query, err
++	}
++	query.Set("buildbinds", string(buildBindsJSON))
++
+ 	return query, nil
+ }
+ 
+diff --git a/api/server/router/local/image.go b/api/server/router/local/image.go
+index ce3ec3c..25f315a 100644
+--- a/api/server/router/local/image.go
++++ b/api/server/router/local/image.go
+@@ -405,6 +405,15 @@ func (s *router) postBuild(ctx context.Context, w http.ResponseWriter, r *http.R
+ 		buildConfig.BuildArgs = buildArgs
+ 	}
+ 
++	var buildBinds = []string{}
++	buildBindsJSON := r.FormValue("buildbinds")
++	if buildBindsJSON != "" {
++		if err := json.NewDecoder(strings.NewReader(buildBindsJSON)).Decode(&buildBinds); err != nil {
++			return errf(err)
++		}
++		buildConfig.Binds = buildBinds
++	}
++
+ 	remoteURL := r.FormValue("remote")
+ 
+ 	// Currently, only used if context is from a remote url.
+diff --git a/api/types/client.go b/api/types/client.go
+index 4846e50..c600b90 100644
+--- a/api/types/client.go
++++ b/api/types/client.go
+@@ -136,6 +136,7 @@ type ImageBuildOptions struct {
+ 	BuildArgs      []string
+ 	AuthConfigs    map[string]AuthConfig
+ 	Context        io.Reader
++	Binds          []string
+ }
+ 
+ // ImageBuildResponse holds information
+diff --git a/builder/dockerfile/builder.go b/builder/dockerfile/builder.go
+index 5b25444..1d0d90f 100644
+--- a/builder/dockerfile/builder.go
++++ b/builder/dockerfile/builder.go
+@@ -57,6 +57,7 @@ type Config struct {
+ 	// resource constraints
+ 	// TODO: factor out to be reused with Run ?
+ 
++	Binds        []string
+ 	Memory       int64
+ 	MemorySwap   int64
+ 	ShmSize      *int64
+diff --git a/builder/dockerfile/internals.go b/builder/dockerfile/internals.go
+index 0d87c12..7057077 100644
+--- a/builder/dockerfile/internals.go
++++ b/builder/dockerfile/internals.go
+@@ -37,6 +37,7 @@ import (
+ 	"github.com/docker/docker/pkg/tarsum"
+ 	"github.com/docker/docker/pkg/urlutil"
+ 	"github.com/docker/docker/runconfig"
++	volumePkg "github.com/docker/docker/volume"
+ )
+ 
+ func (b *Builder) commit(id string, autoCmd *stringutils.StrSlice, comment string) error {
+@@ -463,6 +464,9 @@ func (b *Builder) probeCache() (bool, error) {
+ 	if !ok || !b.UseCache || b.cacheBusted {
+ 		return false, nil
+ 	}
++	if len(b.Binds) > 0 {
++		return false, nil
++	}
+ 	cache, err := c.GetCachedImage(b.image, b.runConfig)
+ 	if err != nil {
+ 		return false, err
+@@ -498,11 +502,44 @@ func (b *Builder) create() (string, error) {
+ 		Ulimits:      b.Ulimits,
+ 	}
+ 
++	// ensure no rw flag is passed in bind-mounts.
++	// if it is just warn it's ignored
++	// and eventually build will fail itself trying to write to ro bind mounts
++	// also change everything to :ro
++	var warnings []string
++	for i, bind := range b.Binds {
++		arr := strings.Split(bind, ":")
++		switch len(arr) {
++		case 2:
++			b.Binds[i] = strings.Join([]string{arr[0], arr[1], "ro"}, ":")
++			break
++		case 3:
++			if volumePkg.ReadWrite(arr[2]) {
++				warnings = append(warnings, fmt.Sprintf("bind mount mode is read-write for %s, it will be changed to read-only", bind))
++				mode := "ro"
++				if strings.Contains(arr[2], "z") {
++					mode = mode + ",z"
++				} else if strings.Contains(arr[2], "Z") {
++					mode = mode + ",Z"
++				}
++				b.Binds[i] = strings.Join([]string{arr[0], arr[1], mode}, ":")
++			}
++			break
++		default:
++			// just skip, run will validate them all...
++		}
++	}
++
++	for _, warning := range warnings {
++		fmt.Fprintf(b.Stdout, " ---> [Warning] %s\n", warning)
++	}
++
+ 	// TODO: why not embed a hostconfig in builder?
+ 	hostConfig := &runconfig.HostConfig{
+ 		Isolation: b.Isolation,
+ 		ShmSize:   b.ShmSize,
+ 		Resources: resources,
++		Binds:     b.Binds,
+ 	}
+ 
+ 	config := *b.runConfig
+diff --git a/docs/reference/commandline/build.md b/docs/reference/commandline/build.md
+index 88e57dc..8f38641 100644
+--- a/docs/reference/commandline/build.md
++++ b/docs/reference/commandline/build.md
+@@ -35,6 +35,7 @@ parent = "smn_cli"
+       --shm-size=[]                   Size of `/dev/shm`. The format is `<number><unit>`. `number` must be greater than `0`.  Unit is optional and can be `b` (bytes), `k` (kilobytes), `m` (megabytes), or `g` (gigabytes). If you omit the unit, the system uses bytes. If you omit the size entirely, the system uses `64m`.
+       -t, --tag=[]                    Name and optionally a tag in the 'name:tag' format
+       --ulimit=[]                     Ulimit options
++      --v, --volume=[]                Set build-time bind mounts
+ 
+ Builds Docker images from a Dockerfile and a "context". A build's context is
+ the files located in the specified `PATH` or `URL`. The build process can refer
+diff --git a/integration-cli/docker_cli_build_test.go b/integration-cli/docker_cli_build_test.go
+index b540af5..88829e6 100644
+--- a/integration-cli/docker_cli_build_test.go
++++ b/integration-cli/docker_cli_build_test.go
+@@ -6623,3 +6623,141 @@ func (s *DockerSuite) TestBuildCacheRootSource(c *check.C) {
+ 
+ 	c.Assert(out, checker.Not(checker.Contains), "Using cache")
+ }
++
++func (s *DockerSuite) TestBuildWithBindMounts(c *check.C) {
++	testRequires(c, DaemonIsLinux)
++	testRequires(c, SameHostDaemon)
++
++	dockerfile := `
++	FROM busybox
++	RUN cat /test/file
++	`
++	tmpDir, err := ioutil.TempDir("", "test")
++	c.Assert(err, check.IsNil)
++	f := filepath.Join(tmpDir, "file")
++	c.Assert(ioutil.WriteFile(f, []byte("foobar"), 0644), check.IsNil)
++
++	cmd := exec.Command(dockerBinary, "build", "-v", tmpDir+":/test/", "-")
++	cmd.Stdin = strings.NewReader(dockerfile)
++	out, _, err := runCommandWithOutput(cmd)
++	c.Assert(err, check.IsNil, check.Commentf(out))
++	c.Assert(out, checker.Contains, "foobar")
++}
++
++func (s *DockerSuite) TestBuildWithBindMountsFile(c *check.C) {
++	testRequires(c, DaemonIsLinux)
++	testRequires(c, SameHostDaemon)
++
++	dockerfile := `
++	FROM busybox
++	RUN cat /file
++	`
++	tmpDir, err := ioutil.TempDir("", "test")
++	c.Assert(err, check.IsNil)
++	f := filepath.Join(tmpDir, "file")
++	c.Assert(ioutil.WriteFile(f, []byte("foobar"), 0644), check.IsNil)
++
++	cmd := exec.Command(dockerBinary, "build", "-v", f+":/file", "-")
++	cmd.Stdin = strings.NewReader(dockerfile)
++	out, _, err := runCommandWithOutput(cmd)
++	c.Assert(err, check.IsNil, check.Commentf(out))
++	c.Assert(out, checker.Contains, "foobar")
++}
++
++func (s *DockerSuite) TestBuildWithBindMountsNoVolume(c *check.C) {
++	dockerfile := `
++	FROM busybox
++	`
++	cmd := exec.Command(dockerBinary, "build", "-v", "/test", "-")
++	cmd.Stdin = strings.NewReader(dockerfile)
++	out, _, err := runCommandWithOutput(cmd)
++	c.Assert(err, check.NotNil, check.Commentf(out))
++	c.Assert(out, checker.Contains, "Volumes aren't supported in docker build. Please use only bind mounts.")
++}
++
++func (s *DockerSuite) TestBuildWithBindMountsNotPersistedFile(c *check.C) {
++	testRequires(c, DaemonIsLinux)
++	testRequires(c, SameHostDaemon)
++
++	dockerfile := `
++	FROM busybox
++	RUN cat /file
++	`
++	tmpDir, err := ioutil.TempDir("", "test")
++	c.Assert(err, check.IsNil)
++	f := filepath.Join(tmpDir, "file")
++	c.Assert(ioutil.WriteFile(f, []byte("foobar"), 0644), check.IsNil)
++
++	cmd := exec.Command(dockerBinary, "build", "-v", f+":/file", "-t", "notpersisted", "-")
++	cmd.Stdin = strings.NewReader(dockerfile)
++	out, _, err := runCommandWithOutput(cmd)
++	c.Assert(err, check.IsNil, check.Commentf(out))
++
++	out, _ = dockerCmd(c, "run", "notpersisted", "cat", "/file")
++	c.Assert(out, check.Not(checker.Contains), "foobar")
++	c.Assert(out, check.Equals, "")
++}
++
++func (s *DockerSuite) TestBuildWithBindMountsNotPersistedDir(c *check.C) {
++	testRequires(c, DaemonIsLinux)
++	testRequires(c, SameHostDaemon)
++
++	dockerfile := `
++	FROM busybox
++	RUN cat /test/file
++	`
++	tmpDir, err := ioutil.TempDir("", "test")
++	c.Assert(err, check.IsNil)
++	f := filepath.Join(tmpDir, "file")
++	c.Assert(ioutil.WriteFile(f, []byte("foobar"), 0644), check.IsNil)
++
++	cmd := exec.Command(dockerBinary, "build", "-t", "notpersisted", "-v", tmpDir+":/test/", "-")
++	cmd.Stdin = strings.NewReader(dockerfile)
++	out, _, err := runCommandWithOutput(cmd)
++	c.Assert(err, check.IsNil, check.Commentf(out))
++
++	out, _, err = dockerCmdWithError("run", "notpersisted", "cat", "/test/file")
++	c.Assert(err, check.NotNil)
++	c.Assert(out, checker.Contains, "cat: can't open '/test/file': No such file or directory")
++}
++
++func (s *DockerSuite) TestBuildWithBindMountsReadOnlyDefault(c *check.C) {
++	testRequires(c, DaemonIsLinux)
++	testRequires(c, SameHostDaemon)
++
++	dockerfile := `
++	FROM busybox
++	RUN echo "test" > /test/file
++	`
++	tmpDir, err := ioutil.TempDir("", "test")
++	c.Assert(err, check.IsNil)
++	f := filepath.Join(tmpDir, "file")
++	c.Assert(ioutil.WriteFile(f, []byte("foobar"), 0644), check.IsNil)
++
++	cmd := exec.Command(dockerBinary, "build", "-t", "defaultro", "-v", tmpDir+":/test/", "-")
++	cmd.Stdin = strings.NewReader(dockerfile)
++	out, _, err := runCommandWithOutput(cmd)
++	c.Assert(err, check.NotNil, check.Commentf(out))
++	c.Assert(out, checker.Contains, "Read-only file system")
++}
++
++func (s *DockerSuite) TestBuildWithBindMountsWarnOnReadWrite(c *check.C) {
++	testRequires(c, DaemonIsLinux)
++	testRequires(c, SameHostDaemon)
++
++	dockerfile := `
++	FROM busybox
++	RUN cat /test/file
++	`
++	tmpDir, err := ioutil.TempDir("", "test")
++	c.Assert(err, check.IsNil)
++	f := filepath.Join(tmpDir, "file")
++	c.Assert(ioutil.WriteFile(f, []byte("foobar"), 0644), check.IsNil)
++
++	cmd := exec.Command(dockerBinary, "build", "-t", "defaultro", "-v", tmpDir+":/test/:rw,Z", "-")
++	cmd.Stdin = strings.NewReader(dockerfile)
++	out, _, err := runCommandWithOutput(cmd)
++	c.Assert(err, check.IsNil, check.Commentf(out))
++	c.Assert(out, checker.Contains, "it will be changed to read-only")
++	c.Assert(out, checker.Contains, "foobar")
++}
+diff --git a/man/docker-build.1.md b/man/docker-build.1.md
+index 4a87c4d..3722b0a 100644
+--- a/man/docker-build.1.md
++++ b/man/docker-build.1.md
+@@ -26,6 +26,7 @@ docker-build - Build a new image from the source code at PATH
+ [**--cpuset-cpus**[=*CPUSET-CPUS*]]
+ [**--cpuset-mems**[=*CPUSET-MEMS*]]
+ [**--ulimit**[=*[]*]]
++[**-v**|**--volume**[=*[]*]]
+ PATH | URL | -
+ 
+ # DESCRIPTION
+@@ -186,6 +187,12 @@ Cgroups are created if they do not already exist.
+ **--ulimit**=[]
+   Ulimit options
+ 
+++**-v**, **--volume**=[] Create a bind mount
+++   (format: `host-dir:container-dir[:<suffix options>]`, where suffix options
+++are comma delimited and selected from [ro] and [z|Z].). Read-write mode isn't supported at build time.
+++In case rw is specified a warning is printed during the build and it will be changed to ro preserving any SELinux mode provided.
+++
++
+   For more information about `ulimit` see [Setting ulimits in a 
+ container](https://docs.docker.com/reference/commandline/run/#setting-ulimits-in-a-container)
+ 
