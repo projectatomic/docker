@@ -1,0 +1,21 @@
+System logging for docker daemon API calls
+
+As part of handling the middleware wrappers around API calls requested
+by clients, log information about the request and the user's identity
+(UID, login name if we can find it, and PID) to syslog.
+
+Signed-off-by: Alec Benson <albenson@redhat.com> (github: alecbenson)
+Signed-off-by: Nalin Dahyabhai <nalin@redhat.com> (github: nalind)
+
+Signed-off-by: Dan Walsh <dwalsh@redhat.com>
+
+System logging for docker daemon API calls
+
+As part of handling the middleware wrappers around API calls requested
+by clients, log information about the request and the user's identity
+(UID, login name if we can find it, and PID) to syslog.
+
+Signed-off-by: Alec Benson <albenson@redhat.com> (github: alecbenson)
+Signed-off-by: Nalin Dahyabhai <nalin@redhat.com> (github: nalind)
+
+Signed-off-by: Dan Walsh <dwalsh@redhat.com>

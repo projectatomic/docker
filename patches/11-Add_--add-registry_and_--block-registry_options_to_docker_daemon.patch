@@ -1,0 +1,2719 @@
+diff --git a/api/client/login.go b/api/client/login.go
+index 3b7a547..5eb00f4 100644
+--- a/api/client/login.go
++++ b/api/client/login.go
+@@ -22,7 +22,7 @@ import (
+ //
+ // Usage: docker login SERVER
+ func (cli *DockerCli) CmdLogin(args ...string) error {
+-	cmd := Cli.Subcmd("login", []string{"[SERVER]"}, Cli.DockerCommands["login"].Description+".\nIf no server is specified \""+registry.IndexServer+"\" is the default.", true)
++	cmd := Cli.Subcmd("login", []string{"[SERVER]"}, Cli.DockerCommands["login"].Description+".\nIf no server is specified \""+registry.IndexServerName()+"\" is the default.", true)
+ 	cmd.Require(flag.Max, 1)
+ 
+ 	var username, password, email string
+@@ -38,7 +38,7 @@ func (cli *DockerCli) CmdLogin(args ...string) error {
+ 		cli.in = os.Stdin
+ 	}
+ 
+-	serverAddress := registry.IndexServer
++	serverAddress := registry.IndexServerName()
+ 	if len(cmd.Args()) > 0 {
+ 		serverAddress = cmd.Arg(0)
+ 	}
+diff --git a/api/client/logout.go b/api/client/logout.go
+index 3753cbb..120635f 100644
+--- a/api/client/logout.go
++++ b/api/client/logout.go
+@@ -14,12 +14,12 @@ import (
+ //
+ // Usage: docker logout [SERVER]
+ func (cli *DockerCli) CmdLogout(args ...string) error {
+-	cmd := Cli.Subcmd("logout", []string{"[SERVER]"}, Cli.DockerCommands["logout"].Description+".\nIf no server is specified \""+registry.IndexServer+"\" is the default.", true)
++	cmd := Cli.Subcmd("logout", []string{"[SERVER]"}, Cli.DockerCommands["logout"].Description+".\nIf no server is specified \""+registry.IndexServerName()+"\" is the default.", true)
+ 	cmd.Require(flag.Max, 1)
+ 
+ 	cmd.ParseFlags(args, true)
+ 
+-	serverAddress := registry.IndexServer
++	serverAddress := registry.IndexServerName()
+ 	if len(cmd.Args()) > 0 {
+ 		serverAddress = cmd.Arg(0)
+ 	}
+diff --git a/api/server/router/local/image.go b/api/server/router/local/image.go
+index 25f315a..32e0da9 100644
+--- a/api/server/router/local/image.go
++++ b/api/server/router/local/image.go
+@@ -480,7 +480,7 @@ func (s *router) postBuild(ctx context.Context, w http.ResponseWriter, r *http.R
+ 	}
+ 
+ 	for _, rt := range repoAndTags {
+-		if err := s.daemon.TagImage(rt, imgID); err != nil {
++		if err := s.daemon.TagImage(rt, imgID, true); err != nil {
+ 			return errf(err)
+ 		}
+ 	}
+@@ -564,7 +564,7 @@ func (s *router) postImagesTag(ctx context.Context, w http.ResponseWriter, r *ht
+ 			return err
+ 		}
+ 	}
+-	if err := s.daemon.TagImage(newTag, vars["name"]); err != nil {
++	if err := s.daemon.TagImage(newTag, vars["name"], true); err != nil {
+ 		return err
+ 	}
+ 	w.WriteHeader(http.StatusCreated)
+diff --git a/contrib/completion/bash/docker b/contrib/completion/bash/docker
+index 4a1b2f3..e2d804b 100644
+--- a/contrib/completion/bash/docker
++++ b/contrib/completion/bash/docker
+@@ -655,9 +655,11 @@ _docker_daemon() {
+ 	"
+ 	local options_with_args="
+ 		$global_options_with_args
++		--add-registry
+ 		--api-cors-header
+ 		--authz-plugin
+ 		--bip
++		--block-registry
+ 		--bridge -b
+ 		--cluster-advertise
+ 		--cluster-store
+diff --git a/contrib/completion/fish/docker.fish b/contrib/completion/fish/docker.fish
+index 33abfd0..7f8db76 100644
+--- a/contrib/completion/fish/docker.fish
++++ b/contrib/completion/fish/docker.fish
+@@ -43,9 +43,11 @@ function __fish_print_docker_repositories --description 'Print a list of docker
+ end
+ 
+ # common options
++complete -c docker -f -n '__fish_docker_no_subcommand' -l add-registry -d 'Query given registry before a public one'
+ complete -c docker -f -n '__fish_docker_no_subcommand' -l api-cors-header -d "Set CORS headers in the remote API. Default is cors disabled"
+ complete -c docker -f -n '__fish_docker_no_subcommand' -s b -l bridge -d 'Attach containers to a pre-existing network bridge'
+ complete -c docker -f -n '__fish_docker_no_subcommand' -l bip -d "Use this CIDR notation address for the network bridge's IP, not compatible with -b"
++complete -c docker -f -n '__fish_docker_no_subcommand' -l block-registry -d "Don't contact given registry"
+ complete -c docker -f -n '__fish_docker_no_subcommand' -s D -l debug -d 'Enable debug mode'
+ complete -c docker -f -n '__fish_docker_no_subcommand' -s d -l daemon -d 'Enable daemon mode'
+ complete -c docker -f -n '__fish_docker_no_subcommand' -l dns -d 'Force Docker to use specific DNS servers'
+diff --git a/daemon/commit.go b/daemon/commit.go
+index 1d3d738..cd0bdb9 100644
+--- a/daemon/commit.go
++++ b/daemon/commit.go
+@@ -125,7 +125,7 @@ func (daemon *Daemon) Commit(name string, c *types.ContainerCommitConfig) (strin
+ 				return "", err
+ 			}
+ 		}
+-		if err := daemon.TagImage(newTag, id.String()); err != nil {
++		if err := daemon.TagImage(newTag, id.String(), true); err != nil {
+ 			return "", err
+ 		}
+ 	}
+diff --git a/daemon/config.go b/daemon/config.go
+index a842bda..1c129be 100644
+--- a/daemon/config.go
++++ b/daemon/config.go
+@@ -3,6 +3,7 @@ package daemon
+ import (
+ 	"github.com/docker/docker/opts"
+ 	flag "github.com/docker/docker/pkg/mflag"
++	"github.com/docker/docker/registry"
+ 	"github.com/docker/docker/runconfig"
+ )
+ 
+@@ -14,25 +15,27 @@ const (
+ // CommonConfig defines the configuration of a docker daemon which are
+ // common across platforms.
+ type CommonConfig struct {
+-	AuthZPlugins  []string // AuthZPlugins holds list of authorization plugins
+-	AutoRestart   bool
+-	Bridge        bridgeConfig // Bridge holds bridge network specific configuration.
+-	Context       map[string][]string
+-	DisableBridge bool
+-	DNS           []string
+-	DNSOptions    []string
+-	DNSSearch     []string
+-	ExecOptions   []string
+-	ExecRoot      string
+-	GraphDriver   string
+-	GraphOptions  []string
+-	Labels        []string
+-	LogConfig     runconfig.LogConfig
+-	Mtu           int
+-	Pidfile       string
+-	RemappedRoot  string
+-	Root          string
+-	TrustKeyPath  string
++	AuthZPlugins         []string // AuthZPlugins holds list of authorization plugins
++	AutoRestart          bool
++	Bridge               bridgeConfig // Bridge holds bridge network specific configuration.
++	Context              map[string][]string
++	DisableBridge        bool
++	DNS                  []string
++	DNSOptions           []string
++	DNSSearch            []string
++	ExecOptions          []string
++	ExecRoot             string
++	GraphDriver          string
++	GraphOptions         []string
++	Labels               []string
++	LogConfig            runconfig.LogConfig
++	Mtu                  int
++	Pidfile              string
++	RemappedRoot         string
++	Root                 string
++	TrustKeyPath         string
++	BlockedRegistries    []string
++	AdditionalRegistries []string
+ 
+ 	// ClusterStore is the storage backend used for the cluster information. It is used by both
+ 	// multihost networking (to store networks and endpoints information) and by the node discovery
+@@ -73,4 +76,6 @@ func (config *Config) InstallCommonFlags(cmd *flag.FlagSet, usageFn func(string)
+ 	cmd.StringVar(&config.ClusterAdvertise, []string{"-cluster-advertise"}, "", usageFn("Address or interface name to advertise"))
+ 	cmd.StringVar(&config.ClusterStore, []string{"-cluster-store"}, "", usageFn("Set the cluster store"))
+ 	cmd.Var(opts.NewMapOpts(config.ClusterOpts, nil), []string{"-cluster-store-opt"}, usageFn("Set cluster store options"))
++	cmd.Var(opts.NewListOptsRef(&config.BlockedRegistries, registry.ValidateIndexName), []string{"-block-registry"}, usageFn("Don't contact given registry"))
++	cmd.Var(opts.NewListOptsRef(&config.AdditionalRegistries, registry.ValidateIndexName), []string{"-add-registry"}, usageFn("Registry to query before a public one"))
+ }
+diff --git a/daemon/daemon.go b/daemon/daemon.go
+index 2e38e68..ce2fa73 100644
+--- a/daemon/daemon.go
++++ b/daemon/daemon.go
+@@ -1039,12 +1039,12 @@ func (daemon *Daemon) changes(container *container.Container) ([]archive.Change,
+ 
+ // TagImage creates a tag in the repository reponame, pointing to the image named
+ // imageName.
+-func (daemon *Daemon) TagImage(newTag reference.Named, imageName string) error {
++func (daemon *Daemon) TagImage(newTag reference.Named, imageName string, keepUnqualified bool) error {
+ 	imageID, err := daemon.GetImageID(imageName)
+ 	if err != nil {
+ 		return err
+ 	}
+-	newTag = registry.NormalizeLocalReference(newTag)
++	newTag = registry.NormalizeLocalReference(newTag, keepUnqualified)
+ 	if err := daemon.tagStore.AddTag(newTag, imageID, true); err != nil {
+ 		return err
+ 	}
+@@ -1302,7 +1302,6 @@ func (daemon *Daemon) GetImageID(refOrID string) (image.ID, error) {
+ 
+ 	// Treat it as a possible tag or digest reference
+ 	if ref, err := reference.ParseNamed(refOrID); err == nil {
+-		ref = registry.NormalizeLocalReference(ref)
+ 		if id, err := daemon.tagStore.Get(ref); err == nil {
+ 			return id, nil
+ 		}
+diff --git a/daemon/images.go b/daemon/images.go
+index 9220400..f3872ae 100644
+--- a/daemon/images.go
++++ b/daemon/images.go
+@@ -10,6 +10,7 @@ import (
+ 	"github.com/docker/docker/api/types/filters"
+ 	"github.com/docker/docker/image"
+ 	"github.com/docker/docker/layer"
++	"github.com/docker/docker/registry"
+ )
+ 
+ var acceptedImageFilterTags = map[string]bool{
+@@ -30,6 +31,53 @@ func (daemon *Daemon) Map() map[image.ID]*image.Image {
+ 	return daemon.imageStore.Map()
+ }
+ 
++func matchReference(filter string, ref reference.Named) bool {
++	if filter == "" {
++		return true
++	}
++
++	var filterTagged bool
++	filterRef, err := reference.Parse(filter)
++	if err == nil { // parse error means wildcard repo
++		if _, ok := filterRef.(reference.Tagged); ok {
++			filterTagged = true
++		}
++	}
++
++	refBelongsToDefaultRegistry := false
++	indexName, remoteNameStr := reference.SplitHostname(ref)
++	for _, reg := range registry.RegistryList {
++		if indexName == reg || indexName == "" {
++			refBelongsToDefaultRegistry = true
++			break
++		}
++	}
++
++	// If the repository belongs to default registry, match against fully
++	// qualified and unqualified name.
++	references := []reference.Named{ref}
++	if registry.IsReferenceFullyQualified(ref) && refBelongsToDefaultRegistry {
++		newRef, err := registry.SubstituteReferenceName(ref, remoteNameStr)
++		if err == nil {
++			references = append(references, newRef)
++		}
++	}
++
++	for _, ref := range references {
++		if filterTagged {
++			// filter by tag, require full ref match
++			if ref.String() == filter {
++				return true
++			}
++		} else if matched, err := path.Match(filter, ref.Name()); matched && err == nil {
++			// name only match, FIXME: docs say exact
++			return true
++		}
++	}
++
++	return false
++}
++
+ // Images returns a filtered list of images. filterArgs is a JSON-encoded set
+ // of filter arguments which will be interpreted by api/types/filters.
+ // filter is a shell glob string applied to repository names. The argument
+@@ -66,16 +114,6 @@ func (daemon *Daemon) Images(filterArgs, filter string, all bool) ([]*types.Imag
+ 
+ 	images := []*types.Image{}
+ 
+-	var filterTagged bool
+-	if filter != "" {
+-		filterRef, err := reference.Parse(filter)
+-		if err == nil { // parse error means wildcard repo
+-			if _, ok := filterRef.(reference.Tagged); ok {
+-				filterTagged = true
+-			}
+-		}
+-	}
+-
+ 	for id, img := range allImages {
+ 		if imageFilters.Include("label") {
+ 			// Very old image that do not have image.Config (or even labels)
+@@ -106,15 +144,10 @@ func (daemon *Daemon) Images(filterArgs, filter string, all bool) ([]*types.Imag
+ 		newImage := newImage(img, size)
+ 
+ 		for _, ref := range daemon.tagStore.References(id) {
+-			if filter != "" { // filter by tag/repo name
+-				if filterTagged { // filter by tag, require full ref match
+-					if ref.String() != filter {
+-						continue
+-					}
+-				} else if matched, err := path.Match(filter, ref.Name()); !matched || err != nil { // name only match, FIXME: docs say exact
+-					continue
+-				}
++			if !matchReference(filter, ref) {
++				continue
+ 			}
++
+ 			if _, ok := ref.(reference.Digested); ok {
+ 				newImage.RepoDigests = append(newImage.RepoDigests, ref.String())
+ 			}
+diff --git a/daemon/import.go b/daemon/import.go
+index 75010e3..9a5dc1f 100644
+--- a/daemon/import.go
++++ b/daemon/import.go
+@@ -92,7 +92,7 @@ func (daemon *Daemon) ImportImage(src string, newRef reference.Named, msg string
+ 
+ 	// FIXME: connect with commit code and call tagstore directly
+ 	if newRef != nil {
+-		if err := daemon.TagImage(newRef, id.String()); err != nil {
++		if err := daemon.TagImage(newRef, id.String(), true); err != nil {
+ 			return err
+ 		}
+ 	}
+diff --git a/daemon/info.go b/daemon/info.go
+index 804bbeb..d8efaf6 100644
+--- a/daemon/info.go
++++ b/daemon/info.go
+@@ -75,7 +75,7 @@ func (daemon *Daemon) SystemInfo() (*types.Info, error) {
+ 		NEventsListener:    daemon.EventsService.SubscribersCount(),
+ 		KernelVersion:      kernelVersion,
+ 		OperatingSystem:    operatingSystem,
+-		IndexServerAddress: registry.IndexServer,
++		IndexServerAddress: registry.IndexServerAddress(),
+ 		OSType:             platform.OSType,
+ 		Architecture:       platform.Architecture,
+ 		RegistryConfig:     daemon.RegistryService.Config,
+diff --git a/distribution/pull.go b/distribution/pull.go
+index 9180de5..8bbc0e2 100644
+--- a/distribution/pull.go
++++ b/distribution/pull.go
+@@ -78,9 +78,40 @@ func newPuller(endpoint registry.APIEndpoint, repoInfo *registry.RepositoryInfo,
+ 	return nil, fmt.Errorf("unknown version %d for registry %s", endpoint.Version, endpoint.URL)
+ }
+ 
+-// Pull initiates a pull operation. image is the repository name to pull, and
+-// tag may be either empty, or indicate a specific tag to pull.
++// Pull initiates a pull operation for given reference. If the reference is
++// fully qualified, image will be pulled from given registry. Otherwise
++// additional registries will be queried until the reference is found.
+ func Pull(ctx context.Context, ref reference.Named, imagePullConfig *ImagePullConfig) error {
++	// Unless the index name is specified, iterate over all registries until
++	// the matching image is found.
++	if registry.IsReferenceFullyQualified(ref) {
++		return pullFromRegistry(ctx, ref, imagePullConfig)
++	}
++	if len(registry.RegistryList) == 0 {
++		return fmt.Errorf("No configured registry to pull from.")
++	}
++	err := registry.ValidateRepositoryName(ref)
++	if err != nil {
++		return err
++	}
++	for _, r := range registry.RegistryList {
++		// Prepend the index name to the image name.
++		fqr, _err := registry.FullyQualifyReferenceWith(r, ref)
++		if _err != nil {
++			logrus.Warnf("Failed to fully qualify %q name with %q registry: %v", ref.Name(), r, _err)
++			err = _err
++			continue
++		}
++		if err = pullFromRegistry(ctx, fqr, imagePullConfig); err == nil {
++			return nil
++		}
++	}
++	return err
++}
++
++// pullFromRegistry initiates a pull operation from particular registry. ref is
++// a fully qualified image reference.
++func pullFromRegistry(ctx context.Context, ref reference.Named, imagePullConfig *ImagePullConfig) error {
+ 	// Resolve the Repository name from fqn to RepositoryInfo
+ 	repoInfo, err := imagePullConfig.RegistryService.ResolveRepository(ref)
+ 	if err != nil {
+@@ -97,7 +128,7 @@ func Pull(ctx context.Context, ref reference.Named, imagePullConfig *ImagePullCo
+ 		return err
+ 	}
+ 
+-	localName := registry.NormalizeLocalReference(ref)
++	localName := registry.NormalizeLocalReference(ref, false)
+ 
+ 	var (
+ 		// use a slice to append the error strings and return a joined string to caller
+@@ -180,7 +211,7 @@ func validateRepoName(name string) error {
+ 	if name == "" {
+ 		return fmt.Errorf("Repository name can't be empty")
+ 	}
+-	if name == "scratch" {
++	if strings.TrimPrefix(name, registry.IndexName+"/") == "scratch" {
+ 		return fmt.Errorf("'scratch' is a reserved name")
+ 	}
+ 	return nil
+diff --git a/distribution/push.go b/distribution/push.go
+index c9aef91..06844a2 100644
+--- a/distribution/push.go
++++ b/distribution/push.go
+@@ -5,6 +5,7 @@ import (
+ 	"compress/gzip"
+ 	"fmt"
+ 	"io"
++	"strings"
+ 
+ 	"github.com/Sirupsen/logrus"
+ 	"github.com/docker/distribution/digest"
+@@ -105,6 +106,19 @@ func Push(ctx context.Context, ref reference.Named, imagePushConfig *ImagePushCo
+ 		return err
+ 	}
+ 
++	// If we're not using a custom registry, we know the restrictions
++	// applied to repository names and can warn the user in advance.
++	// Custom repositories can have different rules, and we must also
++	// allow pushing by image ID.
++	if repoInfo.Official {
++		username := imagePushConfig.AuthConfig.Username
++		if username == "" {
++			username = "<user>"
++		}
++		name := strings.TrimPrefix(repoInfo.RemoteName.Name(), registry.OfficialReposNamePrefix)
++		return fmt.Errorf("You cannot push a \"root\" repository. Please rename your repository to %s/<user>/<repo> (ex: %s/%s/%s)", registry.IndexName, registry.IndexName, username, name)
++	}
++
+ 	endpoints, err := imagePushConfig.RegistryService.LookupPushEndpoints(repoInfo.CanonicalName)
+ 	if err != nil {
+ 		return err
+@@ -112,7 +126,7 @@ func Push(ctx context.Context, ref reference.Named, imagePushConfig *ImagePushCo
+ 
+ 	progress.Messagef(imagePushConfig.ProgressOutput, "", "The push refers to a repository [%s]", repoInfo.CanonicalName.String())
+ 
+-	associations := imagePushConfig.TagStore.ReferencesByName(repoInfo.LocalName)
++	associations := imagePushConfig.TagStore.ReferencesByName(ref)
+ 	if len(associations) == 0 {
+ 		return fmt.Errorf("Repository does not exist: %s", repoInfo.LocalName)
+ 	}
+diff --git a/docker/daemon.go b/docker/daemon.go
+index 5410aa2..a8bbdbc 100644
+--- a/docker/daemon.go
++++ b/docker/daemon.go
+@@ -176,6 +176,26 @@ func (cli *DaemonCli) CmdDaemon(args ...string) error {
+ 		}()
+ 	}
+ 
++	for _, r := range cli.BlockedRegistries {
++		if r == "all" {
++			r = "*"
++		} else if r == "public" {
++			r = registry.IndexName
++		}
++		registry.BlockedRegistries[r] = struct{}{}
++		if r == registry.IndexName || r == "*" {
++			registry.RegistryList = []string{}
++		}
++	}
++
++	newRegistryList := []string{}
++	for _, r := range cli.AdditionalRegistries {
++		if _, ok := registry.BlockedRegistries[r]; !ok {
++			newRegistryList = append(newRegistryList, r)
++		}
++	}
++	registry.RegistryList = append(newRegistryList, registry.RegistryList...)
++
+ 	serverConfig := &apiserver.Config{
+ 		AuthZPluginNames: cli.Config.AuthZPlugins,
+ 		Logging:          true,
+diff --git a/docker/docker.go b/docker/docker.go
+index 9c4180c..cf868bc 100644
+--- a/docker/docker.go
++++ b/docker/docker.go
+@@ -59,6 +59,12 @@ func main() {
+ 
+ 	clientCli := client.NewDockerCli(stdin, stdout, stderr, clientFlags)
+ 
++	for _, lopt := range []string{"-add-registry", "-block-registry"} {
++		if flag.IsSet(lopt) {
++			logrus.Fatalf("The -%s option is recognized only by Docker daemon.", lopt)
++		}
++	}
++
+ 	c := cli.New(clientCli, daemonCli)
+ 	if err := c.Run(flag.Args()...); err != nil {
+ 		if sterr, ok := err.(cli.StatusError); ok {
+diff --git a/image/tarexport/save.go b/image/tarexport/save.go
+index f16a149..0c3f4c9 100644
+--- a/image/tarexport/save.go
++++ b/image/tarexport/save.go
+@@ -75,8 +75,8 @@ func (l *tarexporter) parseNames(names []string) (map[image.ID]*imageDescriptor,
+ 		if err != nil {
+ 			return nil, err
+ 		}
+-		ref = registry.NormalizeLocalReference(ref)
+-		if ref.Name() == string(digest.Canonical) {
++		normalized := registry.NormalizeLocalReference(ref, true)
++		if normalized.Name() == string(digest.Canonical) {
+ 			imgID, err := l.is.Search(name)
+ 			if err != nil {
+ 				return nil, err
+@@ -84,8 +84,8 @@ func (l *tarexporter) parseNames(names []string) (map[image.ID]*imageDescriptor,
+ 			addAssoc(imgID, nil)
+ 			continue
+ 		}
+-		if _, ok := ref.(reference.Digested); !ok {
+-			if _, ok := ref.(reference.NamedTagged); !ok {
++		if _, ok := normalized.(reference.Digested); !ok {
++			if _, ok := normalized.(reference.NamedTagged); !ok {
+ 				assocs := l.ts.ReferencesByName(ref)
+ 				for _, assoc := range assocs {
+ 					addAssoc(assoc.ImageID, assoc.Ref)
+@@ -101,10 +101,10 @@ func (l *tarexporter) parseNames(names []string) (map[image.ID]*imageDescriptor,
+ 			}
+ 		}
+ 		var imgID image.ID
+-		if imgID, err = l.ts.Get(ref); err != nil {
++		if imgID, err = l.ts.Get(normalized); err != nil {
+ 			return nil, err
+ 		}
+-		addAssoc(imgID, ref)
++		addAssoc(imgID, normalized)
+ 
+ 	}
+ 	return imgDescr, nil
+diff --git a/integration-cli/check_test.go b/integration-cli/check_test.go
+index 030b07f..7e996dd 100644
+--- a/integration-cli/check_test.go
++++ b/integration-cli/check_test.go
+@@ -59,7 +59,9 @@ func (s *DockerRegistrySuite) TearDownTest(c *check.C) {
+ 	if s.ds != nil {
+ 		s.ds.TearDownTest(c)
+ 	}
+-	s.d.Stop()
++	if s.d != nil {
++		s.d.Stop()
++	}
+ }
+ 
+ func init() {
+@@ -80,7 +82,9 @@ func (s *DockerDaemonSuite) SetUpTest(c *check.C) {
+ 
+ func (s *DockerDaemonSuite) TearDownTest(c *check.C) {
+ 	testRequires(c, DaemonIsLinux)
+-	s.d.Stop()
++	if s.d != nil {
++		s.d.Stop()
++	}
+ 	s.ds.TearDownTest(c)
+ }
+ 
+@@ -102,7 +106,43 @@ func (s *DockerTrustSuite) SetUpTest(c *check.C) {
+ }
+ 
+ func (s *DockerTrustSuite) TearDownTest(c *check.C) {
+-	s.reg.Close()
+-	s.not.Close()
++	if s.reg != nil {
++		s.reg.Close()
++	}
++	if s.not != nil {
++		s.not.Close()
++	}
++	s.ds.TearDownTest(c)
++}
++
++type DockerRegistriesSuite struct {
++	ds   *DockerSuite
++	reg1 *testRegistryV2
++	reg2 *testRegistryV2
++	d    *Daemon
++}
++
++func (s *DockerRegistriesSuite) SetUpTest(c *check.C) {
++	s.reg1 = setupRegistryAt(c, privateRegistryURL)
++	s.reg2 = setupRegistryAt(c, privateRegistryURL2)
++	s.d = NewDaemon(c)
++}
++
++func (s *DockerRegistriesSuite) TearDownTest(c *check.C) {
++	if s.reg2 != nil {
++		s.reg2.Close()
++	}
++	if s.reg1 != nil {
++		s.reg1.Close()
++	}
++	if s.d != nil {
++		s.d.Stop()
++	}
+ 	s.ds.TearDownTest(c)
+ }
++
++func init() {
++	check.Suite(&DockerRegistriesSuite{
++		ds: &DockerSuite{},
++	})
++}
+diff --git a/integration-cli/docker_cli_build_test.go b/integration-cli/docker_cli_build_test.go
+index 88829e6..625b45c 100644
+--- a/integration-cli/docker_cli_build_test.go
++++ b/integration-cli/docker_cli_build_test.go
+@@ -6761,3 +6761,188 @@ func (s *DockerSuite) TestBuildWithBindMountsWarnOnReadWrite(c *check.C) {
+ 	c.Assert(out, checker.Contains, "it will be changed to read-only")
+ 	c.Assert(out, checker.Contains, "foobar")
+ }
++
++func (s *DockerRegistrySuite) TestBuildWithAdditionalRegistry(c *check.C) {
++	name := "testbuildwithadditionalregistry"
++	if err := s.d.StartWithBusybox("--add-registry=" + s.reg.url); err != nil {
++		c.Fatalf("we should have been able to start the daemon with passing add-registry=%s: %v", s.reg.url, err)
++	}
++	bbImg := s.d.getAndTestImageEntry(c, 1, "busybox", "")
++
++	// build image based on hello-world from docker.io
++	_, _, err := s.d.buildImageWithOut(name, fmt.Sprintf(`
++  FROM library/hello-world
++  ENV test %s
++  `, name), true)
++	if err != nil {
++		c.Fatal(err)
++	}
++	hwImg := s.d.getAndTestImageEntry(c, 3, "docker.io/hello-world", "")
++	if hwImg.id == bbImg.id {
++		c.Fatalf("docker.io/hello-world must have different ID than busybox image")
++	}
++	bImg := s.d.getAndTestImageEntry(c, 3, name, "")
++	if bImg.id == hwImg.id || bImg.id == bbImg.id {
++		c.Fatalf("built image %s must have different ID than other images", name)
++	}
++	res, err := s.d.inspectField(name, "Parent")
++	if err != nil {
++		c.Fatal(err)
++	}
++	if !strings.HasPrefix(res, hwImg.id) {
++		c.Fatalf("built image %s should have docker.io/hello-world(id=%s) as a parent, not %s", name, hwImg.id, res)
++	}
++
++	// push busybox to additional registry as "library/hello-world"
++	if out, err := s.d.Cmd("tag", "busybox", s.reg.url+"/library/hello-world"); err != nil {
++		c.Fatalf("failed to tag image %s: error %v, output %q", "busybox", err, out)
++	}
++	if out, err := s.d.Cmd("push", s.reg.url+"/library/hello-world"); err != nil {
++		c.Fatalf("failed to push image %s: error %v, output %q", s.reg.url+"/library/hello-world", err, out)
++	}
++	toRemove := []string{s.reg.url + "/library/hello-world", "hello-world"}
++	if out, err := s.d.Cmd("rmi", toRemove...); err != nil {
++		c.Fatalf("failed to remove images %v: %v, output: %s", toRemove, err, out)
++	}
++	s.d.getAndTestImageEntry(c, 2, name, "")
++
++	// Build again. The result shall now be based on busybox image from
++	// additional registry.
++	_, _, err = s.d.buildImageWithOut(name, fmt.Sprintf(`
++  FROM library/hello-world
++  ENV test %s
++  `, name), true)
++	if err != nil {
++		c.Fatal(err)
++	}
++	s.d.getAndTestImageEntry(c, 4, s.reg.url+"/library/hello-world", bbImg.id)
++	s.d.getAndTestImageEntry(c, 4, name, "")
++	res, err = s.d.inspectField(name, "Parent")
++	if err != nil {
++		c.Fatal(err)
++	}
++	if !strings.HasPrefix(res, bbImg.id) {
++		c.Fatalf("built image %s should have busybox image (id=%s) as a parent, not %s", name, bbImg.id, res)
++	}
++
++	// build again with docker.io explicitly specified
++	_, _, err = s.d.buildImageWithOut(name, fmt.Sprintf(`
++  FROM docker.io/library/hello-world
++  ENV test %s
++  `, name), true)
++	if err != nil {
++		c.Fatal(err)
++	}
++	s.d.getAndTestImageEntry(c, 5, "docker.io/hello-world", hwImg.id)
++	s.d.getAndTestImageEntry(c, 5, name, "")
++	res, err = s.d.inspectField(name, "Parent")
++	if err != nil {
++		c.Fatal(err)
++	}
++	if !strings.HasPrefix(res, hwImg.id) {
++		c.Fatalf("built image %s should have docker.io/hello-world(id=%s) as a parent, not %s", name, hwImg.id, res)
++	}
++
++	// build again from additional registry explicitly specified
++	_, _, err = s.d.buildImageWithOut(name, fmt.Sprintf(`
++  FROM %s/library/hello-world
++  ENV test %s
++  `, s.reg.url, name), true)
++	if err != nil {
++		c.Fatal(err)
++	}
++	s.d.getAndTestImageEntry(c, 5, s.reg.url+"/library/hello-world", bbImg.id)
++	res, err = s.d.inspectField(name, "Parent")
++	if err != nil {
++		c.Fatal(err)
++	}
++	if !strings.HasPrefix(res, bbImg.id) {
++		c.Fatalf("built image %s should have busybox(id=%s) as a parent, not %s", name, bbImg.id, res)
++	}
++}
++
++// Test building of image based on busybox with public registry blocked. Name
++// of image that shall be built is specified by `name`. Parameter `daemonArgs`
++// shall contain at least one `--block-registry` flag.
++func (s *DockerRegistrySuite) doTestBuildWithPublicRegistryBlocked(c *check.C, name string, daemonArgs []string) {
++	allBlocked := false
++	for _, arg := range daemonArgs {
++		if arg == "--block-registry=all" {
++			allBlocked = true
++		}
++	}
++	if err := s.d.StartWithBusybox(daemonArgs...); err != nil {
++		c.Fatalf("we should have been able to start the daemon with passing { %s }: %v", strings.Join(daemonArgs, ", "), err)
++	}
++	busyboxID := s.d.getAndTestImageEntry(c, 1, "busybox", "").id
++
++	// try to build image based on hello-world from docker.io
++	_, _, err := s.d.buildImageWithOut(name, fmt.Sprintf(`
++  FROM library/hello-world
++  ENV test %s
++  `, name), true)
++	if err == nil {
++		c.Fatal("build should have failed because of public registry being blocked")
++	}
++
++	// now base the image on local busybox image
++	_, _, err = s.d.buildImageWithOut(name, fmt.Sprintf(`
++  FROM busybox
++  ENV test %s
++  `, name), true)
++	if err != nil {
++		c.Fatal(err)
++	}
++	s.d.getAndTestImageEntry(c, 2, name, "")
++	if res, err := s.d.inspectField(name, "Parent"); err != nil {
++		c.Fatal(err)
++	} else if !strings.HasPrefix(res, busyboxID) {
++		c.Fatalf("built image %s should have busybox(id=%s) as a parent, not %s", name, busyboxID, res)
++	}
++
++	if out, err := s.d.Cmd("tag", "busybox", s.reg.url+"/library/busybox"); err != nil {
++		c.Fatalf("failed to tag image %s: error %v, output %q", "busybox", err, out)
++	}
++	if out, err := s.d.Cmd("push", s.reg.url+"/library/busybox"); !allBlocked && err != nil {
++		c.Fatalf("failed to push image %s: error %v, output %q", s.reg.url+"/library/busybox", err, out)
++	} else if allBlocked && err == nil {
++		c.Fatalf("push to private registry should have failed, output: %q", out)
++	}
++
++	toRemove := []string{"busybox", s.reg.url + "/library/busybox"}
++	if out, err := s.d.Cmd("rmi", toRemove...); err != nil {
++		c.Fatalf("failed to remove images %v: %v, output: %s", toRemove, err, out)
++	}
++	s.d.getAndTestImageEntry(c, 1, name, "")
++
++	// now base the image on busybox from private registry
++	_, _, err = s.d.buildImageWithOut(name, fmt.Sprintf(`
++  FROM %s/library/busybox
++  ENV test %s
++  `, s.reg.url, name), true)
++	if !allBlocked && err != nil {
++		c.Fatal(err)
++	} else if allBlocked && err == nil {
++		c.Fatalf("the build should have failed due to all registries being blocked")
++	}
++	if !allBlocked {
++		s.d.getAndTestImageEntry(c, 2, name, "")
++		if res, err := s.d.inspectField(name, "Parent"); err != nil {
++			c.Fatal(err)
++		} else if !strings.HasPrefix(res, busyboxID) {
++			c.Fatalf("built image %s should have busybox image (id=%s) as a parent, not %s", name, busyboxID, res)
++		}
++	}
++}
++
++func (s *DockerRegistrySuite) TestBuildWithPublicRegistryBlocked(c *check.C) {
++	for _, blockedRegistry := range []string{"public", "docker.io"} {
++		s.doTestBuildWithPublicRegistryBlocked(c, "testbuildpublicregistryblocked", []string{"--block-registry=" + blockedRegistry})
++		s.d.Stop()
++		s.d = NewDaemon(c)
++	}
++}
++
++func (s *DockerRegistrySuite) TestBuildWithAllRegistriesBlocked(c *check.C) {
++	s.doTestBuildWithPublicRegistryBlocked(c, "testbuildwithallregistriesblocked", []string{"--block-registry=all"})
++}
+diff --git a/integration-cli/docker_cli_images_test.go b/integration-cli/docker_cli_images_test.go
+index d821150..bc7aad8 100644
+--- a/integration-cli/docker_cli_images_test.go
++++ b/integration-cli/docker_cli_images_test.go
+@@ -233,3 +233,58 @@ func (s *DockerSuite) TestImagesFilterNameWithPort(c *check.C) {
+ 	out, _ = dockerCmd(c, "images", tag+":no-such-tag")
+ 	c.Assert(out, checker.Not(checker.Contains), tag)
+ }
++
++func (s *DockerDaemonSuite) doTestImagesWithAdditionalRegistry(c *check.C, publicBlocked bool) {
++	daemonArgs := []string{"--add-registry=example.com"}
++	if publicBlocked {
++		daemonArgs = append(daemonArgs, "--block-registry=public")
++	}
++	if err := s.d.StartWithBusybox(daemonArgs...); err != nil {
++		c.Fatalf("we should have been able to start the daemon with passing { %s } flags: %v", strings.Join(daemonArgs, ", "), err)
++	}
++
++	if out, err := s.d.Cmd("tag", "busybox", "example.com/busybox"); err != nil {
++		c.Fatalf("failed to tag image %s: error %v, output %q", "busybox", err, out)
++	}
++	if out, err := s.d.Cmd("tag", "busybox", "docker.io/busybox"); err != nil {
++		c.Fatalf("failed to tag image %s: error %v, output %q", "busybox", err, out)
++	}
++	if out, err := s.d.Cmd("tag", "busybox", "other.com/busybox"); err != nil {
++		c.Fatalf("failed to tag image %s: error %v, output %q", "busybox", err, out)
++	}
++
++	expected := []string{"busybox:latest", "example.com/busybox:latest"}
++	if !publicBlocked {
++		expected = append(expected, "docker.io/busybox:latest")
++	}
++	images := s.d.getImages(c, "*box")
++	if len(images) != len(expected) {
++		c.Errorf("got     : %v", images)
++		c.Errorf("expected: %v", expected)
++		c.Fatalf("got unexpected number of images (%d), expected: %d, images: %v", len(images), len(expected), images)
++	}
++	for _, exp := range expected {
++		if _, ok := images[exp]; !ok {
++			c.Errorf("expected image name %s, not found among images: %v", exp, images)
++		}
++	}
++
++	expected = []string{"docker.io/busybox:latest", "example.com/busybox:latest", "other.com/busybox:latest"}
++	images = s.d.getImages(c, "*/*box")
++	if len(images) != len(expected) {
++		c.Fatalf("got unexpected number of images (%d), expected: %d, images: %v", len(images), len(expected), images)
++	}
++	for _, exp := range expected {
++		if _, ok := images[exp]; !ok {
++			c.Errorf("expected image name %s, not found among images: %v", exp, images)
++		}
++	}
++}
++
++func (s *DockerDaemonSuite) TestImagesWithAdditionalRegistry(c *check.C) {
++	s.doTestImagesWithAdditionalRegistry(c, false)
++}
++
++func (s *DockerDaemonSuite) TestImagesWithPublicRegistryBlocked(c *check.C) {
++	s.doTestImagesWithAdditionalRegistry(c, true)
++}
+diff --git a/integration-cli/docker_cli_pull_local_test.go b/integration-cli/docker_cli_pull_local_test.go
+index 64d3214..a0eb10a 100644
+--- a/integration-cli/docker_cli_pull_local_test.go
++++ b/integration-cli/docker_cli_pull_local_test.go
+@@ -228,3 +228,147 @@ func (s *DockerRegistrySuite) TestPullIDStability(c *check.C) {
+ 		c.Fatalf("expected %s; got %s", derivedImage, out)
+ 	}
+ }
++
++// Test pulls from blocked public registry and from private registry. This
++// shall be called with various daemonArgs containing at least one
++// `--block-registry` flag.
++func (s *DockerRegistrySuite) doTestPullFromBlockedPublicRegistry(c *check.C, daemonArgs []string) {
++	allBlocked := false
++	for _, arg := range daemonArgs {
++		if arg == "--block-registry=all" {
++			allBlocked = true
++		}
++	}
++	if err := s.d.StartWithBusybox(daemonArgs...); err != nil {
++		c.Fatalf("we should have been able to start the daemon with passing { %s } flags: %v", strings.Join(daemonArgs, ", "), err)
++	}
++
++	busyboxID := s.d.getAndTestImageEntry(c, 1, "busybox", "").id
++
++	// try to pull from docker.io
++	if out, err := s.d.Cmd("pull", "library/hello-world"); err == nil {
++		c.Fatalf("pull from blocked public registry should have failed, output: %s", out)
++	}
++
++	// tag busybox as library/hello-world and push it to some private registry
++	if out, err := s.d.Cmd("tag", "busybox", s.reg.url+"/library/hello-world"); err != nil {
++		c.Fatalf("failed to tag image %s: error %v, output %q", "busybox", err, out)
++	}
++	if out, err := s.d.Cmd("push", s.reg.url+"/library/hello-world"); !allBlocked && err != nil {
++		c.Fatalf("failed to push image %s: error %v, output %q", s.reg.url+"/library/hello-world", err, out)
++	} else if allBlocked && err == nil {
++		c.Fatalf("push to private registry should have failed, output: %q", out)
++	}
++
++	// remove library/hello-world image
++	if out, err := s.d.Cmd("rmi", s.reg.url+"/library/hello-world"); err != nil {
++		c.Fatalf("failed to remove images %v: %v, output: %s", s.reg.url+"/library/hello-world", err, out)
++	}
++	s.d.getAndTestImageEntry(c, 1, "busybox", busyboxID)
++
++	// try to pull from private registry
++	if out, err := s.d.Cmd("pull", s.reg.url+"/library/hello-world"); !allBlocked && err != nil {
++		c.Fatalf("we should have been able to pull %s/library/hello-world: %v", s.reg.url, err)
++	} else if allBlocked && err == nil {
++		c.Fatalf("pull from private registry should have failed, output: %q", out)
++	} else if !allBlocked {
++		s.d.getAndTestImageEntry(c, 2, s.reg.url+"/library/hello-world", busyboxID)
++	}
++}
++
++func (s *DockerRegistrySuite) TestPullFromBlockedPublicRegistry(c *check.C) {
++	for _, blockedRegistry := range []string{"public", "docker.io"} {
++		s.doTestPullFromBlockedPublicRegistry(c, []string{"--block-registry=" + blockedRegistry})
++		s.d.Stop()
++		s.d = NewDaemon(c)
++	}
++}
++
++func (s *DockerRegistrySuite) TestPullWithAllRegistriesBlocked(c *check.C) {
++	s.doTestPullFromBlockedPublicRegistry(c, []string{"--block-registry=all"})
++}
++
++// Test pulls from additional registry with public registry blocked. This
++// shall be called with various daemonArgs containing at least one
++// `--block-registry` flag.
++func (s *DockerRegistriesSuite) doTestPullFromPrivateRegistriesWithPublicBlocked(c *check.C, daemonArgs []string) {
++	allBlocked := false
++	for _, arg := range daemonArgs {
++		if arg == "--block-registry=all" {
++			allBlocked = true
++		}
++	}
++	daemonArgs = append(daemonArgs, "--add-registry="+s.reg1.url)
++	if err := s.d.StartWithBusybox(daemonArgs...); err != nil {
++		c.Fatalf("we should have been able to start the daemon with passing { %s } flags: %v", strings.Join(daemonArgs, ", "), err)
++	}
++
++	bbImg := s.d.getAndTestImageEntry(c, 1, "busybox", "")
++
++	// try to pull from blocked public registry
++	if out, err := s.d.Cmd("pull", "library/hello-world"); err == nil {
++		c.Fatalf("pulling from blocked public registry should have failed, output: %s", out)
++	}
++
++	// push busybox to
++	//  additional registry as "misc/busybox"
++	//  private registry as "library/busybox"
++	// and remove all local images
++	if out, err := s.d.Cmd("tag", "busybox", s.reg1.url+"/misc/busybox"); err != nil {
++		c.Fatalf("failed to tag image %s: error %v, output %q", "busybox", err, out)
++	}
++	if out, err := s.d.Cmd("tag", "busybox", s.reg2.url+"/library/busybox"); err != nil {
++		c.Fatalf("failed to tag image %s: error %v, output %q", "busybox", err, out)
++	}
++	if out, err := s.d.Cmd("push", s.reg1.url+"/misc/busybox"); err != nil {
++		c.Fatalf("failed to push image %s: error %v, output %q", s.reg1.url+"/misc/busybox", err, out)
++	}
++	if out, err := s.d.Cmd("push", s.reg2.url+"/library/busybox"); !allBlocked && err != nil {
++		c.Fatalf("failed to push image %s: error %v, output %q", s.reg2.url+"/library/busybox", err, out)
++	} else if allBlocked && err == nil {
++		c.Fatalf("push to private registry should have failed, output: %q", out)
++	}
++	toRemove := []string{"busybox", "misc/busybox", s.reg2.url + "/library/busybox"}
++	if out, err := s.d.Cmd("rmi", toRemove...); err != nil {
++		c.Fatalf("failed to remove images %v: %v, output: %s", toRemove, err, out)
++	}
++	s.d.getAndTestImageEntry(c, 0, "", "")
++
++	// try to pull "library/busybox" from additional registry
++	if out, err := s.d.Cmd("pull", "library/busybox"); err == nil {
++		c.Fatalf("pull of library/busybox from additional registry should have failed, output: %q", out)
++	}
++
++	// now pull the "misc/busybox" from additional registry
++	if _, err := s.d.Cmd("pull", "misc/busybox"); err != nil {
++		c.Fatalf("we should have been able to pull misc/hello-world from %q: %v", s.reg1.url, err)
++	}
++	bb2Img := s.d.getAndTestImageEntry(c, 1, s.reg1.url+"/misc/busybox", "")
++	if bb2Img.size != bbImg.size {
++		c.Fatalf("expected %s and %s to have the same size (%s != %s)", bb2Img.name, bbImg.name, bb2Img.size, bbImg.size)
++	}
++
++	// try to pull "library/busybox" from private registry
++	if out, err := s.d.Cmd("pull", s.reg2.url+"/library/busybox"); !allBlocked && err != nil {
++		c.Fatalf("we should have been able to pull %s/library/busybox: %v", s.reg2.url, err)
++	} else if allBlocked && err == nil {
++		c.Fatalf("pull from private registry should have failed, output: %q", out)
++	} else if !allBlocked {
++		bb3Img := s.d.getAndTestImageEntry(c, 2, s.reg2.url+"/library/busybox", "")
++		if bb3Img.size != bbImg.size {
++			c.Fatalf("expected %s and %s to have the same size (%s != %s)", bb3Img.name, bbImg.name, bb3Img.size, bbImg.size)
++		}
++	}
++}
++
++func (s *DockerRegistriesSuite) TestPullFromPrivateRegistriesWithPublicBlocked(c *check.C) {
++	for _, blockedRegistry := range []string{"public", "docker.io"} {
++		s.doTestPullFromPrivateRegistriesWithPublicBlocked(c, []string{"--block-registry=" + blockedRegistry})
++		s.d.Stop()
++		s.d = NewDaemon(c)
++	}
++}
++
++func (s *DockerRegistriesSuite) TestPullFromAdditionalRegistryWithAllBlocked(c *check.C) {
++	s.doTestPullFromPrivateRegistriesWithPublicBlocked(c, []string{"--block-registry=all"})
++}
+diff --git a/integration-cli/docker_cli_pull_test.go b/integration-cli/docker_cli_pull_test.go
+index 8ea31a7..bd6c1b0 100644
+--- a/integration-cli/docker_cli_pull_test.go
++++ b/integration-cli/docker_cli_pull_test.go
+@@ -19,11 +19,11 @@ func (s *DockerHubPullSuite) TestPullFromCentralRegistry(c *check.C) {
+ 	defer deleteImages("hello-world")
+ 
+ 	c.Assert(out, checker.Contains, "Using default tag: latest", check.Commentf("expected the 'latest' tag to be automatically assumed"))
+-	c.Assert(out, checker.Contains, "Pulling from library/hello-world", check.Commentf("expected the 'library/' prefix to be automatically assumed"))
+-	c.Assert(out, checker.Contains, "Downloaded newer image for hello-world:latest")
++	c.Assert(regexp.MustCompile(`Pulling.*from.*library/hello-world\b`).MatchString(out), checker.Equals, true, check.Commentf("expected the 'library/' prefix to be automatically assumed in: %s", out))
++	c.Assert(out, checker.Contains, "Downloaded newer image for docker.io/hello-world:latest")
+ 
+ 	matches := regexp.MustCompile(`Digest: (.+)\n`).FindAllStringSubmatch(out, -1)
+-	c.Assert(len(matches), checker.Equals, 1, check.Commentf("expected exactly one image digest in the output"))
++	c.Assert(len(matches), checker.Equals, 1, check.Commentf("expected exactly one image digest in the output: %s", out))
+ 	c.Assert(len(matches[0]), checker.Equals, 2, check.Commentf("unexpected number of submatches for the digest"))
+ 	_, err := digest.ParseDigest(matches[0][1])
+ 	c.Check(err, checker.IsNil, check.Commentf("invalid digest %q in output", matches[0][1]))
+@@ -32,7 +32,7 @@ func (s *DockerHubPullSuite) TestPullFromCentralRegistry(c *check.C) {
+ 	img := strings.TrimSpace(s.Cmd(c, "images"))
+ 	if splitImg := strings.Split(img, "\n"); len(splitImg) != 2 {
+ 		c.Fatalf("expected only two lines in the output of `docker images`, got %d", len(splitImg))
+-	} else if re := regexp.MustCompile(`^hello-world\s+latest`); !re.Match([]byte(splitImg[1])) {
++	} else if re := regexp.MustCompile(`^docker\.io/hello-world\s+latest`); !re.Match([]byte(splitImg[1])) {
+ 		c.Fatal("invalid output for `docker images` (expected image and tag name")
+ 	}
+ }
+@@ -76,14 +76,14 @@ func (s *DockerHubPullSuite) TestPullFromCentralRegistryImplicitRefParts(c *chec
+ 		"index.docker.io/library/hello-world",
+ 	} {
+ 		out := s.Cmd(c, "pull", i)
+-		c.Assert(out, checker.Contains, "Image is up to date for hello-world:latest")
++		c.Assert(out, checker.Contains, "Image is up to date for docker.io/hello-world:latest")
+ 	}
+ 
+ 	// We should have a single entry in images.
+ 	img := strings.TrimSpace(s.Cmd(c, "images"))
+ 	if splitImg := strings.Split(img, "\n"); len(splitImg) != 2 {
+ 		c.Fatalf("expected only two lines in the output of `docker images`, got %d", len(splitImg))
+-	} else if re := regexp.MustCompile(`^hello-world\s+latest`); !re.Match([]byte(splitImg[1])) {
++	} else if re := regexp.MustCompile(`^docker\.io/hello-world\s+latest`); !re.Match([]byte(splitImg[1])) {
+ 		c.Fatal("invalid output for `docker images` (expected image and tag name")
+ 	}
+ }
+@@ -115,7 +115,7 @@ func (s *DockerHubPullSuite) TestPullAllTagsFromCentralRegistry(c *check.C) {
+ 	// Verify that the line for 'busybox:latest' is left unchanged.
+ 	var latestLine string
+ 	for _, line := range strings.Split(outImageAllTagCmd, "\n") {
+-		if strings.HasPrefix(line, "busybox") && strings.Contains(line, "latest") {
++		if strings.HasPrefix(line, "docker.io/busybox") && strings.Contains(line, "latest") {
+ 			latestLine = line
+ 			break
+ 		}
+@@ -166,3 +166,209 @@ func (s *DockerHubPullSuite) TestPullClientDisconnect(c *check.C) {
+ 		c.Fatal("image was pulled after client disconnected")
+ 	}
+ }
++
++func (s *DockerRegistrySuite) TestPullFromAdditionalRegistry(c *check.C) {
++	testRequires(c, DaemonIsLinux)
++	testRequires(c, Network)
++
++	if err := s.d.StartWithBusybox("--add-registry=" + s.reg.url); err != nil {
++		c.Fatalf("we should have been able to start the daemon with passing add-registry=%s: %v", s.reg.url, err)
++	}
++
++	bbImg := s.d.getAndTestImageEntry(c, 1, "busybox", "")
++
++	// this will pull from docker.io
++	if _, err := s.d.Cmd("pull", "library/hello-world"); err != nil {
++		c.Fatalf("we should have been able to pull library/hello-world from %q: %v", s.reg.url, err)
++	}
++
++	hwImg := s.d.getAndTestImageEntry(c, 2, "docker.io/hello-world", "")
++	if hwImg.id == bbImg.id || hwImg.size == bbImg.size {
++		c.Fatalf("docker.io/hello-world must have different ID and size than busybox image")
++	}
++
++	// push busybox to additional registry as "library/hello-world" and remove all local images
++	if out, err := s.d.Cmd("tag", "busybox", s.reg.url+"/library/hello-world"); err != nil {
++		c.Fatalf("failed to tag image %s: error %v, output %q", "busybox", err, out)
++	}
++	if out, err := s.d.Cmd("push", s.reg.url+"/library/hello-world"); err != nil {
++		c.Fatalf("failed to push image %s: error %v, output %q", s.reg.url+"/library/hello-world", err, out)
++	}
++	toRemove := []string{"library/hello-world", "busybox", "docker.io/hello-world"}
++	if out, err := s.d.Cmd("rmi", toRemove...); err != nil {
++		c.Fatalf("failed to remove images %v: %v, output: %s", toRemove, err, out)
++	}
++	s.d.getAndTestImageEntry(c, 0, "", "")
++
++	// pull the same name again - now the image should be pulled from additional registry
++	if _, err := s.d.Cmd("pull", "library/hello-world"); err != nil {
++		c.Fatalf("we should have been able to pull library/hello-world from %q: %v", s.reg.url, err)
++	}
++	hw2Img := s.d.getAndTestImageEntry(c, 1, s.reg.url+"/library/hello-world", "")
++	if hw2Img.size != bbImg.size {
++		c.Fatalf("expected %s and %s to have the same size (%s != %s)", hw2Img.name, bbImg.name, hw2Img.size, hwImg.size)
++	}
++
++	// empty images once more
++	if out, err := s.d.Cmd("rmi", s.reg.url+"/library/hello-world"); err != nil {
++		c.Fatalf("failed to remove image %s: %v, output: %s", s.reg.url+"library/hello-world", err, out)
++	}
++	s.d.getAndTestImageEntry(c, 0, "", "")
++
++	// now pull with fully qualified name
++	if _, err := s.d.Cmd("pull", "docker.io/library/hello-world"); err != nil {
++		c.Fatalf("we should have been able to pull docker.io/library/hello-world from %q: %v", s.reg.url, err)
++	}
++	hw3Img := s.d.getAndTestImageEntry(c, 1, "docker.io/hello-world", "")
++	if hw3Img.size != hwImg.size {
++		c.Fatalf("expected %s and %s to have the same size (%s != %s)", hw3Img.name, hwImg.name, hw3Img.size, hwImg.size)
++	}
++}
++
++func (s *DockerRegistriesSuite) TestPullFromAdditionalRegistries(c *check.C) {
++	testRequires(c, DaemonIsLinux)
++	testRequires(c, Network)
++
++	daemonArgs := []string{"--add-registry=" + s.reg1.url, "--add-registry=" + s.reg2.url}
++	if err := s.d.StartWithBusybox(daemonArgs...); err != nil {
++		c.Fatalf("we should have been able to start the daemon with passing { %s } flags: %v", strings.Join(daemonArgs, ", "), err)
++	}
++
++	bbImg := s.d.getAndTestImageEntry(c, 1, "busybox", "")
++
++	// this will pull from docker.io
++	if out, err := s.d.Cmd("pull", "library/hello-world"); err != nil {
++		c.Fatalf("we should have been able to pull library/hello-world from \"docker.io\": %s\n\nError:%v", out, err)
++	}
++	hwImg := s.d.getAndTestImageEntry(c, 2, "docker.io/hello-world", "")
++	if hwImg.id == bbImg.id {
++		c.Fatalf("docker.io/hello-world must have different ID than busybox image")
++	}
++
++	// push:
++	//  hello-world to 1st additional registry as "misc/hello-world"
++	//  busybox to 2nd additional registry as "library/hello-world"
++	if out, err := s.d.Cmd("tag", "docker.io/hello-world", s.reg1.url+"/misc/hello-world"); err != nil {
++		c.Fatalf("failed to tag image %s: error %v, output %q", "docker.io/hello-world", err, out)
++	}
++	if out, err := s.d.Cmd("tag", "busybox", s.reg2.url+"/library/hello-world"); err != nil {
++		c.Fatalf("failed to tag image %s: error %v, output %q", "/busybox", err, out)
++	}
++	if out, err := s.d.Cmd("push", s.reg1.url+"/misc/hello-world"); err != nil {
++		c.Fatalf("failed to push image %s: error %v, output %q", s.reg1.url+"/misc/hello-world", err, out)
++	}
++	if out, err := s.d.Cmd("push", s.reg2.url+"/library/hello-world"); err != nil {
++		c.Fatalf("failed to push image %s: error %v, output %q", s.reg2.url+"/library/busybox", err, out)
++	}
++	// and remove all local images
++	toRemove := []string{"misc/hello-world", s.reg2.url + "/library/hello-world", "busybox", "docker.io/hello-world"}
++	if out, err := s.d.Cmd("rmi", toRemove...); err != nil {
++		c.Fatalf("failed to remove images %v: %v, output: %s", toRemove, err, out)
++	}
++	s.d.getAndTestImageEntry(c, 0, "", "")
++
++	// now pull the "library/hello-world" from 2nd additional registry
++	if _, err := s.d.Cmd("pull", "library/hello-world"); err != nil {
++		c.Fatalf("we should have been able to pull library/hello-world from %q: %v", s.reg2.url, err)
++	}
++	hw2Img := s.d.getAndTestImageEntry(c, 1, s.reg2.url+"/library/hello-world", "")
++	if hw2Img.size != bbImg.size {
++		c.Fatalf("expected %s and %s to have the same size (%s != %s)", hw2Img.name, bbImg.name, hw2Img.size, bbImg.size)
++	}
++
++	// now pull the "misc/hello-world" from 1st additional registry
++	if _, err := s.d.Cmd("pull", "misc/hello-world"); err != nil {
++		c.Fatalf("we should have been able to pull misc/hello-world from %q: %v", s.reg2.url, err)
++	}
++	hw3Img := s.d.getAndTestImageEntry(c, 2, s.reg1.url+"/misc/hello-world", "")
++	if hw3Img.size != hwImg.size {
++		c.Fatalf("expected %s and %s to have the same size (%s != %s)", hw3Img.name, hwImg.name, hw3Img.size, hwImg.size)
++	}
++
++	// tag it as library/hello-world and push it to 1st registry
++	if out, err := s.d.Cmd("tag", s.reg1.url+"/misc/hello-world", s.reg1.url+"/library/hello-world"); err != nil {
++		c.Fatalf("failed to tag image %s: error %v, output %q", s.reg1.url+"/misc/hello-world", err, out)
++	}
++	if out, err := s.d.Cmd("push", s.reg1.url+"/library/hello-world"); err != nil {
++		c.Fatalf("failed to push image %s: error %v, output %q", s.reg1.url+"/library/hello-world", err, out)
++	}
++
++	// remove all images
++	toRemove = []string{s.reg1.url + "/misc/hello-world", s.reg1.url + "/library/hello-world", s.reg2.url + "/library/hello-world"}
++	if out, err := s.d.Cmd("rmi", toRemove...); err != nil {
++		c.Fatalf("failed to remove images %v: %v, output: %s", toRemove, err, out)
++	}
++	s.d.getAndTestImageEntry(c, 0, "", "")
++
++	// now pull "library/hello-world" from 1st additional registry
++	if _, err := s.d.Cmd("pull", "library/hello-world"); err != nil {
++		c.Fatalf("we should have been able to pull library/hello-world from %q: %v", s.reg1.url, err)
++	}
++	hw4Img := s.d.getAndTestImageEntry(c, 1, s.reg1.url+"/library/hello-world", "")
++	if hw4Img.size != hwImg.size {
++		c.Fatalf("expected %s and %s to have the same size (%s != %s)", hw4Img.name, hwImg.name, hw4Img.size, hwImg.size)
++	}
++
++	// now pull fully qualified image from 2nd registry
++	if _, err := s.d.Cmd("pull", s.reg2.url+"/library/hello-world"); err != nil {
++		c.Fatalf("we should have been able to pull %s/library/hello-world: %v", s.reg2.url, err)
++	}
++	bb2Img := s.d.getAndTestImageEntry(c, 2, s.reg2.url+"/library/hello-world", "")
++	if bb2Img.size != bbImg.size {
++		c.Fatalf("expected %s and %s to have the same size (%s != %s)", bb2Img.name, bbImg.name, bb2Img.size, bbImg.size)
++	}
++}
++
++func (s *DockerRegistriesSuite) TestPullFromBlockedRegistry(c *check.C) {
++	testRequires(c, DaemonIsLinux)
++	testRequires(c, Network)
++
++	daemonArgs := []string{"--block-registry=" + s.reg1.url, "--add-registry=" + s.reg2.url}
++	if err := s.d.StartWithBusybox(daemonArgs...); err != nil {
++		c.Fatalf("we should have been able to start the daemon with passing { %s } flags: %v", strings.Join(daemonArgs, ", "), err)
++	}
++
++	bbImg := s.d.getAndTestImageEntry(c, 1, "busybox", "")
++
++	// pull image from docker.io
++	if _, err := s.d.Cmd("pull", "library/hello-world"); err != nil {
++		c.Fatalf("we should have been able to pull library/hello-world from \"docker.io\": %v", err)
++	}
++	hwImg := s.d.getAndTestImageEntry(c, 2, "docker.io/hello-world", "")
++	if hwImg.size == bbImg.size {
++		c.Fatalf("docker.io/hello-world must have different size than busybox image")
++	}
++
++	// push "hello-world" to blocked and additional registry and remove all local images
++	if out, err := s.d.Cmd("tag", "busybox", s.reg1.url+"/library/hello-world"); err != nil {
++		c.Fatalf("failed to tag image %s: error %v, output %q", "busybox", err, out)
++	}
++	if out, err := s.d.Cmd("tag", "busybox", s.reg2.url+"/library/hello-world"); err != nil {
++		c.Fatalf("failed to tag image %s: error %v, output %q", "busybox", err, out)
++	}
++	if out, err := s.d.Cmd("push", s.reg1.url+"/library/hello-world"); err == nil {
++		c.Fatalf("push to blocked registry should have failed, output: %q", out)
++	}
++	if out, err := s.d.Cmd("push", s.reg2.url+"/library/hello-world"); err != nil {
++		c.Fatalf("failed to push image %s: error %v, output %q", s.reg2.url+"/library/hello-world", err, out)
++	}
++	toRemove := []string{"library/hello-world", s.reg1.url + "/library/hello-world", "docker.io/hello-world", "busybox"}
++	if out, err := s.d.Cmd("rmi", toRemove...); err != nil {
++		c.Fatalf("failed to remove images %v: %v, output: %s", toRemove, err, out)
++	}
++	s.d.getAndTestImageEntry(c, 0, "", "")
++
++	// try to pull "library/hello-world" from blocked registry
++	if out, err := s.d.Cmd("pull", s.reg1.url+"/library/hello-world"); err == nil {
++		c.Fatalf("pull of library/hello-world from additional registry should have failed, output: %q", out)
++	}
++
++	// now pull the "library/hello-world" from additional registry
++	if _, err := s.d.Cmd("pull", s.reg2.url+"/library/hello-world"); err != nil {
++		c.Fatalf("we should have been able to pull library/hello-world from %q: %v", s.reg2.url, err)
++	}
++	bb2Img := s.d.getAndTestImageEntry(c, 1, s.reg2.url+"/library/hello-world", "")
++	if bb2Img.size != bbImg.size {
++		c.Fatalf("expected %s and %s to have the same size (%s != %s)", bb2Img.name, bbImg.name, bb2Img.size, bbImg.size)
++	}
++}
+diff --git a/integration-cli/docker_cli_push_test.go b/integration-cli/docker_cli_push_test.go
+index 79ac272..3e7a6be 100644
+--- a/integration-cli/docker_cli_push_test.go
++++ b/integration-cli/docker_cli_push_test.go
+@@ -2,10 +2,13 @@ package main
+ 
+ import (
+ 	"archive/tar"
++	"bufio"
+ 	"fmt"
++	"io"
+ 	"io/ioutil"
+ 	"os"
+ 	"os/exec"
++	"regexp"
+ 	"strings"
+ 	"time"
+ 
+@@ -303,3 +306,107 @@ func (s *DockerTrustSuite) TestTrustedPushWithExpiredTimestamp(c *check.C) {
+ 		c.Assert(out, checker.Contains, "Signing and pushing trust metadata", check.Commentf("Missing expected output on trusted push with expired timestamp"))
+ 	})
+ }
++
++func (s *DockerSuite) TestPushOfficialImage(c *check.C) {
++	var reErr = regexp.MustCompile(`rename your repository to[^:]*:\s*docker\.io/<user>/busybox\b`)
++
++	// push busybox to public registry as "library/busybox"
++	cmd := exec.Command(dockerBinary, "push", "library/busybox")
++	stdout, err := cmd.StdoutPipe()
++	if err != nil {
++		c.Fatalf("Failed to get stdout pipe for process: %v", err)
++	}
++	stderr, err := cmd.StderrPipe()
++	if err != nil {
++		c.Fatalf("Failed to get stderr pipe for process: %v", err)
++	}
++	if err := cmd.Start(); err != nil {
++		c.Fatalf("Failed to start pushing to public registry: %v", err)
++	}
++	outReader := bufio.NewReader(stdout)
++	errReader := bufio.NewReader(stderr)
++	line, isPrefix, err := errReader.ReadLine()
++	if err != nil {
++		c.Fatalf("Failed to read farewell: %v", err)
++	}
++	if isPrefix {
++		c.Errorf("Got unexpectedly long output.")
++	}
++	if !reErr.Match(line) {
++		c.Errorf("Got unexpected output %q", line)
++	}
++	if line, _, err = outReader.ReadLine(); err != io.EOF {
++		c.Errorf("Expected EOF, not: %q", line)
++	}
++	for ; err != io.EOF; line, _, err = errReader.ReadLine() {
++		c.Errorf("Expected no message on stderr, got: %q", string(line))
++	}
++
++	// Wait for command to finish with short timeout.
++	finish := make(chan struct{})
++	go func() {
++		if err := cmd.Wait(); err == nil {
++			c.Error("Push command should have failed.")
++		}
++		close(finish)
++	}()
++	select {
++	case <-finish:
++	case <-time.After(1 * time.Second):
++		c.Fatalf("Docker push failed to exit.")
++	}
++}
++
++func (s *DockerRegistrySuite) TestPushToAdditionalRegistry(c *check.C) {
++	if err := s.d.StartWithBusybox("--add-registry=" + s.reg.url); err != nil {
++		c.Fatalf("we should have been able to start the daemon with passing add-registry=%s: %v", s.reg.url, err)
++	}
++
++	bbImg := s.d.getAndTestImageEntry(c, 1, "busybox", "")
++
++	// push busybox to additional registry as "library/busybox" and remove all local images
++	if out, err := s.d.Cmd("tag", "busybox", "library/busybox"); err != nil {
++		c.Fatalf("failed to tag image %s: error %v, output %q", "busybox", err, out)
++	}
++	if out, err := s.d.Cmd("push", "library/busybox"); err != nil {
++		c.Fatalf("failed to push image library/busybox: error %v, output %q", err, out)
++	}
++	toRemove := []string{"busybox", "library/busybox"}
++	if out, err := s.d.Cmd("rmi", toRemove...); err != nil {
++		c.Fatalf("failed to remove images %v: %v, output: %s", toRemove, err, out)
++	}
++	s.d.getAndTestImageEntry(c, 0, "", "")
++
++	// pull it from additional registry
++	if _, err := s.d.Cmd("pull", "library/busybox"); err != nil {
++		c.Fatalf("we should have been able to pull library/busybox from %q: %v", s.reg.url, err)
++	}
++	bb2Img := s.d.getAndTestImageEntry(c, 1, s.reg.url+"/library/busybox", "")
++	if bb2Img.size != bbImg.size {
++		c.Fatalf("expected %s and %s to have the same size (%s != %s)", bb2Img.name, bbImg.name, bb2Img.size, bbImg.size)
++	}
++}
++
++func (s *DockerRegistrySuite) TestPushCustomTagToAdditionalRegistry(c *check.C) {
++	if err := s.d.StartWithBusybox("--add-registry=" + s.reg.url); err != nil {
++		c.Fatalf("we should have been able to start the daemon with passing add-registry=%s: %v", s.reg.url, err)
++	}
++
++	busyboxID := s.d.getAndTestImageEntry(c, 1, "busybox", "").id
++
++	if out, err := s.d.Cmd("tag", "busybox", "user/busybox:1.2.3"); err != nil {
++		c.Fatalf("failed to tag image %s: error %v, output %q", "busybox", err, out)
++	}
++	if out, err := s.d.Cmd("tag", "busybox", s.reg.url+"/user/busybox:latest"); err != nil {
++		c.Fatalf("failed to tag image %s: error %v, output %q", "busybox", err, out)
++	}
++	if out, err := s.d.Cmd("push", "user/busybox:1.2.3"); err != nil {
++		c.Fatalf("failed to push image user/busybox: error %v, output %q", err, out)
++	}
++	s.d.getAndTestImageEntry(c, 3, "user/busybox", busyboxID)
++	toRemove := []string{"user/busybox:1.2.3"}
++	if out, err := s.d.Cmd("rmi", toRemove...); err != nil {
++		c.Fatalf("failed to remove images %v: %v, output: %s", toRemove, err, out)
++	}
++	s.d.getAndTestImageEntry(c, 2, s.reg.url+"/user/busybox", busyboxID)
++}
+diff --git a/integration-cli/docker_cli_rmi_test.go b/integration-cli/docker_cli_rmi_test.go
+index 2f456e8..233c94c 100644
+--- a/integration-cli/docker_cli_rmi_test.go
++++ b/integration-cli/docker_cli_rmi_test.go
+@@ -3,6 +3,7 @@ package main
+ import (
+ 	"fmt"
+ 	"os/exec"
++	"regexp"
+ 	"strings"
+ 
+ 	"github.com/docker/docker/pkg/integration/checker"
+@@ -13,14 +14,34 @@ import (
+ func (s *DockerSuite) TestRmiWithContainerFails(c *check.C) {
+ 	testRequires(c, DaemonIsLinux)
+ 	errSubstr := "is using it"
++	imageName := regexp.MustCompile(`(?m)^([^/ ]+/busybox)\s+`)
++
++	// remove any fully-qualified busybox images created by prior tests
++	out, _, err := runCommandWithOutput(exec.Command(dockerBinary, "images"))
++	if err != nil {
++		c.Fatalf("failed to list images: %v", err)
++	}
++	args := []string{"rmi", "-f"}
++	for _, name := range imageName.FindAllStringSubmatch(out, -1) {
++		args = append(args, name[1])
++	}
++	if len(args) > 2 {
++		rmiCmd := exec.Command(dockerBinary, args...)
++		if out, _, err = runCommandWithOutput(rmiCmd); err != nil {
++			c.Errorf("failed to remove all fully-qualified busybox images: %s, %v", out, err)
++		}
++	}
+ 
+ 	// create a container
+-	out, _ := dockerCmd(c, "run", "-d", "busybox", "true")
++	out, _, err = dockerCmdWithError("run", "-d", "busybox", "true")
++	if err != nil {
++		c.Fatalf("failed to create a container: %s, %v", out, err)
++	}
+ 
+ 	cleanedContainerID := strings.TrimSpace(out)
+ 
+ 	// try to delete the image
+-	out, _, err := dockerCmdWithError("rmi", "busybox")
++	out, _, err = dockerCmdWithError("rmi", "busybox")
+ 	// Container is using image, should not be able to rmi
+ 	c.Assert(err, checker.NotNil)
+ 	// Container is using image, error message should contain errSubstr
+diff --git a/integration-cli/docker_cli_run_test.go b/integration-cli/docker_cli_run_test.go
+index 3bab96f..d70f303 100644
+--- a/integration-cli/docker_cli_run_test.go
++++ b/integration-cli/docker_cli_run_test.go
+@@ -3924,3 +3924,73 @@ func (s *DockerSuite) TestRunNamedVolumesMountedAsShared(c *check.C) {
+ 	}
+ 
+ }
++
++func (s *DockerRegistrySuite) TestRunWithAdditionalRegistry(c *check.C) {
++	if err := s.d.StartWithBusybox("--add-registry=" + s.reg.url); err != nil {
++		c.Fatalf("we should have been able to start the daemon with passing add-registry=%s: %v", s.reg.url, err)
++	}
++
++	bbImg := s.d.getAndTestImageEntry(c, 1, "busybox", "")
++
++	// push busybox to additional registry as "library/hello-world" and remove all local images
++	if out, err := s.d.Cmd("tag", "busybox", s.reg.url+"/busybox"); err != nil {
++		c.Fatalf("failed to tag image busybox: error %v, output %q", err, out)
++	}
++	if out, err := s.d.Cmd("rmi", "busybox"); err != nil {
++		c.Fatalf("failed to remove image busybox: %v, output: %s", err, out)
++	}
++	s.d.getAndTestImageEntry(c, 1, s.reg.url+"/busybox", bbImg.id)
++
++	// try to run fully qualified image
++	if out, err := s.d.Cmd("run", "-t", s.reg.url+"/busybox", "sh", "-c", "echo foo"); err != nil {
++		c.Fatalf("failed to run %s/busybox image: %v, output: %s", s.reg.url, err, out)
++	} else if strings.TrimSpace(out) != "foo" {
++		c.Fatalf("got unexpected output: %q", out)
++	}
++
++	// try to run unqualified
++	if out, err := s.d.Cmd("run", "-t", "busybox", "sh", "-c", "echo foo"); err != nil {
++		c.Fatalf("failed to run busybox image: %v, output: %s", err, out)
++	} else if out != "foo\r\n" {
++		c.Fatalf("got unexpected output: %q", out)
++	}
++
++	// try to run hello world from additional registry
++	if out, err := s.d.Cmd("run", "-t", s.reg.url+"/library/hello-world", "sh", "-c", "echo foo"); err == nil {
++		c.Fatalf("running container from image %s/library/hello-world should have failed; output: %s", s.reg.url, out)
++	}
++
++	// try to run hello-world from official registry
++	if out, err := s.d.Cmd("run", "-t", "library/hello-world"); err != nil {
++		c.Fatalf("failed to run library/hello-world image: %v, output: %s", err, out)
++	} else if strings.HasSuffix(strings.TrimSpace(out), "foo") {
++		c.Fatalf("got unexpected output")
++	}
++	s.d.getAndTestImageEntry(c, 2, "docker.io/hello-world", "")
++
++	// push busybox to additional registry as "library/hello-world" and remove all local images
++	if out, err := s.d.Cmd("tag", s.reg.url+"/busybox", s.reg.url+"/library/hello-world"); err != nil {
++		c.Fatalf("failed to tag image %s: error %v, output %q", s.reg.url+"/busybox", err, out)
++	}
++	if out, err := s.d.Cmd("push", s.reg.url+"/library/hello-world"); err != nil {
++		c.Fatalf("failed to push image %s: error %v, output %q", s.reg.url+"/library/hello-world", err, out)
++	}
++	args := []string{"-f", "hello-world", "library/hello-world", "busybox"}
++	if out, err := s.d.Cmd("rmi", args...); err != nil {
++		c.Fatalf("failed to remove images %v: %v, output: %s", args[1:], err, out)
++	}
++	s.d.getAndTestImageEntry(c, 0, "", "")
++
++	// now try to run unqualified hello-world again - this time we should pull from additional registry
++	if out, err := s.d.Cmd("run", "-t", "library/hello-world", "sh", "-c", "echo foo"); err != nil {
++		c.Fatalf("failed to run library/hello-world image: %v, output: %s", err, out)
++	} else if !strings.HasSuffix(strings.TrimSpace(out), "\nfoo") {
++		c.Fatalf("got unexpected output: %q", out)
++	}
++	// image id now differs from busybox because ids are generated again upon full pull
++	hwImg := s.d.getAndTestImageEntry(c, 1, s.reg.url+"/library/hello-world", "")
++	// therefore we need to compare size
++	if bbImg.size != hwImg.size {
++		c.Fatalf("expected %s:%s and %s:%s to have equal size (%s != %s)", hwImg.name, hwImg.tag, bbImg.name, bbImg.tag, hwImg.size, bbImg.size)
++	}
++}
+diff --git a/integration-cli/docker_cli_tag_test.go b/integration-cli/docker_cli_tag_test.go
+index 7e27a75..5739165 100644
+--- a/integration-cli/docker_cli_tag_test.go
++++ b/integration-cli/docker_cli_tag_test.go
+@@ -135,7 +135,7 @@ func (s *DockerSuite) TestTagOfficialNames(c *check.C) {
+ 		out, _, err = dockerCmdWithError("images")
+ 		if err != nil {
+ 			c.Errorf("listing images failed with errors: %v, %s", err, out)
+-		} else if strings.Contains(out, name) {
++		} else if strings.Contains(out, name) && name != "docker.io/busybox" {
+ 			c.Errorf("images should not have listed '%s'", name)
+ 			deleteImages(name + ":latest")
+ 		}
+diff --git a/integration-cli/docker_test_vars.go b/integration-cli/docker_test_vars.go
+index e876736..00d16d3 100644
+--- a/integration-cli/docker_test_vars.go
++++ b/integration-cli/docker_test_vars.go
+@@ -17,7 +17,8 @@ var (
+ 	registryImageName = "registry"
+ 
+ 	// the private registry to use for tests
+-	privateRegistryURL = "127.0.0.1:5000"
++	privateRegistryURL  = "127.0.0.1:5000"
++	privateRegistryURL2 = "127.0.0.1:5001"
+ 
+ 	runtimePath    = "/var/run/docker"
+ 	execDriverPath = runtimePath + "/execdriver/native"
+diff --git a/integration-cli/docker_utils.go b/integration-cli/docker_utils.go
+index 5580032..1f55584 100644
+--- a/integration-cli/docker_utils.go
++++ b/integration-cli/docker_utils.go
+@@ -18,6 +18,7 @@ import (
+ 	"os/exec"
+ 	"path"
+ 	"path/filepath"
++	"regexp"
+ 	"strconv"
+ 	"strings"
+ 	"time"
+@@ -126,6 +127,10 @@ type clientConfig struct {
+ 	addr      string
+ }
+ 
++type localImageEntry struct {
++	name, tag, id, size string
++}
++
+ // NewDaemon returns a Daemon instance to be used for testing.
+ // This will create a directory such as d123456789 in the folder specified by $DEST.
+ // The daemon will not automatically start.
+@@ -474,6 +479,110 @@ func (d *Daemon) LogfileName() string {
+ 	return d.logFile.Name()
+ }
+ 
++func (d *Daemon) buildImageWithOut(name, dockerfile string, useCache bool) (string, string, error) {
++	args := []string{"--host", d.sock(), "build", "-t", name}
++	if !useCache {
++		args = append(args, "--no-cache")
++	}
++	args = append(args, "-")
++	c := exec.Command(dockerBinary, args...)
++	c.Stdin = strings.NewReader(dockerfile)
++	out, err := c.CombinedOutput()
++	if err != nil {
++		return "", string(out), fmt.Errorf("failed to build the image: %s", out)
++	}
++	id, err := d.inspectField(name, "Id")
++	if err != nil {
++		return "", string(out), err
++	}
++	return id, string(out), nil
++}
++
++// getImages lists images of given Docker daemon and returns it in a
++// map with keys in form <name>:<tag>.
++func (d *Daemon) getImages(c *check.C, args ...string) map[string]*localImageEntry {
++	reImageEntry := regexp.MustCompile(`(?m)^([[:alnum:]/.:_<>-]+)\s+([[:alnum:]._<>-]+)\s+((?:sha\d+:)?[a-fA-F0-9]+)\s+\S+\s+(.+)`)
++	result := make(map[string]*localImageEntry)
++
++	out, err := d.Cmd("images", args...)
++	if err != nil {
++		c.Fatalf("failed to list images: %v", err)
++	}
++	matches := reImageEntry.FindAllStringSubmatch(out, -1)
++	if matches != nil {
++		for i, match := range matches {
++			if i < 1 && match[1] == "REPOSITORY" {
++				continue // skip header
++			}
++			key := match[1]
++			if match[2] != "" && match[2] != "<none>" {
++				key += ":" + match[2]
++			}
++			result[key] = &localImageEntry{match[1], match[2], match[3], match[4]}
++		}
++	}
++	return result
++}
++
++// getAndTestImageEntry lists  images of given Docker daemon and assert
++// expected values. Unless expectedImageCount is negative, assert the number of
++// images of Docker daemon. Unless repoName is empty, assert it exists and
++// return its matching localImageEntry. If the tag is missing, it won't be
++// checked. Unless expectedImageID is empty, assert that image ID of given
++// repoName matches this one.
++func (d *Daemon) getAndTestImageEntry(c *check.C, expectedImageCount int, repoName, expectedImageID string) *localImageEntry {
++	reRefTagged := regexp.MustCompile(`^(.*):([^:/]+)$`)
++	images := d.getImages(c)
++	if expectedImageCount >= 0 && len(images) != expectedImageCount {
++		switch expectedImageCount {
++		case 0:
++			c.Fatalf("expected empty local image database, got %d images", len(images))
++		case 1:
++			c.Fatalf("expected exactly 1 local image, got %d", len(images))
++		default:
++			c.Fatalf("expected exactly %d local images, got %d", expectedImageCount, len(images))
++		}
++	}
++
++	matchTag := reRefTagged.MatchString(repoName)
++
++	if repoName != "" {
++		img, found := images[repoName]
++		if !found {
++			keys := make([]string, 0, len(images))
++			for k := range images {
++				if !matchTag {
++					if strings.HasPrefix(k, repoName+":") {
++						found = true
++						img = images[k]
++						break
++					}
++				}
++				keys = append(keys, k)
++			}
++			if !found {
++				c.Fatalf("%s missing in list of images: %v", repoName, keys)
++			}
++		}
++
++		if expectedImageID != "" && img.id != expectedImageID {
++			c.Fatalf("image ID of %s does not match expected (%s != %s)", repoName, img.id, expectedImageID)
++		}
++
++		return img
++	}
++	return nil
++}
++
++func (d *Daemon) inspectField(name, field string) (string, error) {
++	format := fmt.Sprintf("{{.%s}}", field)
++	out, err := d.Cmd("inspect", "-f", format, name)
++	if err != nil {
++		return "", fmt.Errorf("failed to inspect %s: %s", name, out)
++	}
++	return strings.TrimSpace(out), nil
++}
++
+ func daemonHost() string {
+ 	daemonURLStr := "unix://" + opts.DefaultUnixSocket
+ 	if daemonHostVar := os.Getenv("DOCKER_HOST"); daemonHostVar != "" {
+@@ -600,11 +709,16 @@ func readBody(b io.ReadCloser) ([]byte, error) {
+ 
+ func deleteContainer(container string) error {
+ 	container = strings.TrimSpace(strings.Replace(container, "\n", " ", -1))
++	if container == "" {
++		return nil
++	}
+ 	rmArgs := strings.Split(fmt.Sprintf("rm -fv %v", container), " ")
+-	exitCode, err := runCommand(exec.Command(dockerBinary, rmArgs...))
++	out, exitCode, err := runCommandWithOutput(exec.Command(dockerBinary, rmArgs...))
+ 	// set error manually if not set
+ 	if exitCode != 0 && err == nil {
+-		err = fmt.Errorf("failed to remove container: `docker rm` exit is non-zero")
++		err = fmt.Errorf("failed to remove container: `docker rm` exit is non-zero: \n%s", out)
++	} else if err != nil {
++		err = fmt.Errorf("failed to remove container: %v\n%s", err, out)
+ 	}
+ 
+ 	return err
+@@ -624,11 +738,13 @@ func deleteAllContainers() error {
+ 	containers, err := getAllContainers()
+ 	if err != nil {
+ 		fmt.Println(containers)
++		fmt.Fprintf(os.Stderr, "deleteAllContainers: %v\n", err)
+ 		return err
+ 	}
+ 
+ 	if containers != "" {
+ 		if err = deleteContainer(containers); err != nil {
++			fmt.Fprintf(os.Stderr, "failed to delete containers %s: %v\n", containers, err)
+ 			return err
+ 		}
+ 	}
+@@ -682,10 +798,13 @@ func deleteAllVolumes() error {
+ 		status, b, err := sockRequest("DELETE", "/volumes/"+v.Name, nil)
+ 		if err != nil {
+ 			errors = append(errors, err.Error())
++			fmt.Fprintf(os.Stderr, "deleteAllVolumes: %s\n", err.Error())
+ 			continue
+ 		}
+ 		if status != http.StatusNoContent {
+-			errors = append(errors, fmt.Sprintf("error deleting volume %s: %s", v.Name, string(b)))
++			errMsg := fmt.Sprintf("error deleting volume %s: %s", v.Name, string(b))
++			fmt.Fprintf(os.Stderr, "%s\n", errMsg)
++			errors = append(errors, errMsg)
+ 		}
+ 	}
+ 	if len(errors) > 0 {
+@@ -709,7 +828,7 @@ func getAllVolumes() ([]*types.Volume, error) {
+ var protectedImages = map[string]struct{}{}
+ 
+ func deleteAllImages() error {
+-	out, err := exec.Command(dockerBinary, "images").CombinedOutput()
++	out, err := exec.Command(dockerBinary, "images", "--digests").CombinedOutput()
+ 	if err != nil {
+ 		return err
+ 	}
+@@ -720,20 +839,29 @@ func deleteAllImages() error {
+ 			continue
+ 		}
+ 		fields := strings.Fields(l)
+-		imgTag := fields[0] + ":" + fields[1]
+-		if _, ok := protectedImages[imgTag]; !ok {
++		imgRef := fields[0] + ":" + fields[1]
++		if fields[1] == "<none>" {
++			if fields[2] != "<none>" {
++				imgRef = fields[0] + "@" + fields[2]
++			} else {
++				imgRef = fields[0]
++			}
++		}
++		if _, ok := protectedImages[imgRef]; !ok {
+ 			if fields[0] == "<none>" {
+-				imgs = append(imgs, fields[2])
++				imgs = append(imgs, fields[3])
+ 				continue
+ 			}
+-			imgs = append(imgs, imgTag)
++			imgs = append(imgs, imgRef)
+ 		}
+ 	}
+ 	if len(imgs) == 0 {
+ 		return nil
+ 	}
+ 	args := append([]string{"rmi", "-f"}, imgs...)
+-	if err := exec.Command(dockerBinary, args...).Run(); err != nil {
++	rmiCmd := exec.Command(dockerBinary, args...)
++	if out, _, err := runCommandWithOutput(rmiCmd); err != nil {
++		fmt.Fprintf(os.Stderr, "removing unprotected images (%s): failed with: %v\n%s", strings.Join(imgs, ", "), err, out)
+ 		return err
+ 	}
+ 	return nil
+@@ -798,6 +926,7 @@ func deleteImages(images ...string) error {
+ 	exitCode, err := runCommand(rmiCmd)
+ 	// set error manually if not set
+ 	if exitCode != 0 && err == nil {
++		fmt.Fprintf(os.Stderr, "deleteImages: failed to remove images: %v\n", err)
+ 		err = fmt.Errorf("failed to remove image: `docker rmi` exit is non-zero")
+ 	}
+ 	return err
+@@ -1513,9 +1642,9 @@ func daemonTime(c *check.C) time.Time {
+ 	return dt
+ }
+ 
+-func setupRegistry(c *check.C) *testRegistryV2 {
++func setupRegistryAt(c *check.C, url string) *testRegistryV2 {
+ 	testRequires(c, RegistryHosting)
+-	reg, err := newTestRegistryV2(c)
++	reg, err := newTestRegistryV2At(c, url)
+ 	c.Assert(err, check.IsNil)
+ 
+ 	// Wait for registry to be ready to serve requests.
+@@ -1530,6 +1659,10 @@ func setupRegistry(c *check.C) *testRegistryV2 {
+ 	return reg
+ }
+ 
++func setupRegistry(c *check.C) *testRegistryV2 {
++	return setupRegistryAt(c, privateRegistryURL)
++}
++
+ func setupNotary(c *check.C) *testNotary {
+ 	testRequires(c, NotaryHosting)
+ 	ts, err := newTestNotary(c)
+diff --git a/integration-cli/registry.go b/integration-cli/registry.go
+index 35e1b4e..f66e799 100644
+--- a/integration-cli/registry.go
++++ b/integration-cli/registry.go
+@@ -16,10 +16,11 @@ const v2binary = "registry-v2"
+ 
+ type testRegistryV2 struct {
+ 	cmd *exec.Cmd
++	url string
+ 	dir string
+ }
+ 
+-func newTestRegistryV2(c *check.C) (*testRegistryV2, error) {
++func newTestRegistryV2At(c *check.C, url string) (*testRegistryV2, error) {
+ 	template := `version: 0.1
+ loglevel: debug
+ storage:
+@@ -36,7 +37,7 @@ http:
+ 	if err != nil {
+ 		return nil, err
+ 	}
+-	if _, err := fmt.Fprintf(config, template, tmp, privateRegistryURL); err != nil {
++	if _, err := fmt.Fprintf(config, template, tmp, url); err != nil {
+ 		os.RemoveAll(tmp)
+ 		return nil, err
+ 	}
+@@ -51,13 +52,18 @@ http:
+ 	}
+ 	return &testRegistryV2{
+ 		cmd: cmd,
++		url: url,
+ 		dir: tmp,
+ 	}, nil
+ }
+ 
++func newTestRegistryV2(c *check.C) (*testRegistryV2, error) {
++	return newTestRegistryV2At(c, privateRegistryURL)
++}
++
+ func (t *testRegistryV2) Ping() error {
+ 	// We always ping through HTTP for our test registry.
+-	resp, err := http.Get(fmt.Sprintf("http://%s/v2/", privateRegistryURL))
++	resp, err := http.Get(fmt.Sprintf("http://%s/v2/", t.url))
+ 	if err != nil {
+ 		return err
+ 	}
+diff --git a/man/docker-daemon.8.md b/man/docker-daemon.8.md
+index f06a05e..986d047 100644
+--- a/man/docker-daemon.8.md
++++ b/man/docker-daemon.8.md
+@@ -6,10 +6,12 @@ docker-daemon - Enable daemon mode
+ 
+ # SYNOPSIS
+ **docker daemon**
++[**--add-registry**[=*[]*]]
+ [**--api-cors-header**=[=*API-CORS-HEADER*]]
+ [**--authz-plugin**[=*[]*]]
+ [**-b**|**--bridge**[=*BRIDGE*]]
+ [**--bip**[=*BIP*]]
++[**--block-registry**[=*[]*]]
+ [**--cluster-store**[=*[]*]]
+ [**--cluster-advertise**[=*[]*]]
+ [**--cluster-store-opt**[=*map[]*]]
+@@ -68,6 +70,9 @@ format.
+ 
+ # OPTIONS
+ 
++**--add-registry**=[]
++  **EXPERIMENTAL** Each given registry will be queried before a public Docker registry during image pulls or searches. They will be searched in the order given. Registry mirrors won't apply to them.
++
+ **--api-cors-header**=""
+   Set CORS headers in the remote API. Default is cors disabled. Give urls like "http://foo, http://bar, ...". Give "*" to allow all.
+ 
+@@ -80,6 +85,9 @@ format.
+ **--bip**=""
+   Use the provided CIDR notation address for the dynamically created bridge (docker0); Mutually exclusive of \-b
+ 
++**--block-registry**=[]
++  **EXPERIMENTAL** Prevent Docker daemon from contacting specified registries. There are two special keywords recognized. The first is "public" and represents public Docker registry. The second is "all" which causes all registries but those added with **--add-registry** flag to be blocked.
++
+ **--cluster-store**=""
+   URL of the distributed storage backend
+ 
+diff --git a/registry/config.go b/registry/config.go
+index 2eeba14..f8e80fb 100644
+--- a/registry/config.go
++++ b/registry/config.go
+@@ -36,9 +36,19 @@ const (
+ 	NotaryServer = "https://notary.docker.io"
+ 
+ 	// IndexServer = "https://registry-stage.hub.docker.com/v1/"
++
++	// OfficialReposNamePrefix is a remote name component of official
++	// repositories. It is stripped from repository local name.
++	OfficialReposNamePrefix = "library/"
+ )
+ 
+ var (
++	// BlockedRegistries is a set of registries that can't be contacted. A
++	// special entry "*" causes all registries but those present in
++	// RegistryList to be blocked.
++	BlockedRegistries map[string]struct{}
++	// RegistryList is a list of default registries..
++	RegistryList = []string{IndexName}
+ 	// ErrInvalidRepositoryName is an error returned if the repository name did
+ 	// not have the correct form
+ 	ErrInvalidRepositoryName = errors.New("Invalid repository name (ex: \"registry.domain.tld/myrepos\")")
+@@ -50,6 +60,29 @@ var (
+ 	V2Only = false
+ )
+ 
++func init() {
++	BlockedRegistries = make(map[string]struct{})
++}
++
++// IndexServerName returns the name of default index server.
++func IndexServerName() string {
++	if len(RegistryList) < 1 {
++		return ""
++	}
++	return RegistryList[0]
++}
++
++// IndexServerAddress returns index uri of default registry.
++func IndexServerAddress() string {
++	if IndexServerName() == IndexName {
++		return IndexServer
++	} else if IndexServerName() == "" {
++		return ""
++	} else {
++		return fmt.Sprintf("https://%s/v1/", IndexServerName())
++	}
++}
++
+ // InstallFlags adds command-line options to the top-level flag parser for
+ // the current process.
+ func (options *Options) InstallFlags(cmd *flag.FlagSet, usageFn func(string) string) {
+@@ -101,12 +134,22 @@ func NewServiceConfig(options *Options) *registrytypes.ServiceConfig {
+ 		}
+ 	}
+ 
+-	// Configure public registry.
+-	config.IndexConfigs[IndexName] = &registrytypes.IndexInfo{
+-		Name:     IndexName,
+-		Mirrors:  config.Mirrors,
+-		Secure:   true,
+-		Official: true,
++	for _, r := range RegistryList {
++		var mirrors []string
++		if config.IndexConfigs[r] == nil {
++			// Use mirrors only with official index
++			if r == IndexName {
++				mirrors = config.Mirrors
++			} else {
++				mirrors = make([]string, 0)
++			}
++			config.IndexConfigs[r] = &registrytypes.IndexInfo{
++				Name:     r,
++				Mirrors:  mirrors,
++				Secure:   isSecureIndex(config, r),
++				Official: r == IndexName,
++			}
++		}
+ 	}
+ 
+ 	return config
+@@ -129,6 +172,9 @@ func isSecureIndex(config *registrytypes.ServiceConfig, indexName string) bool {
+ 	if index, ok := config.IndexConfigs[indexName]; ok {
+ 		return index.Secure
+ 	}
++	if indexName == IndexName {
++		return true
++	}
+ 
+ 	host, _, err := net.SplitHostPort(indexName)
+ 	if err != nil {
+@@ -185,6 +231,14 @@ func ValidateIndexName(val string) (string, error) {
+ 	if val == "index."+IndexName {
+ 		val = IndexName
+ 	}
++	for _, r := range RegistryList {
++		if val == r {
++			break
++		}
++		if val == "index."+r {
++			val = r
++		}
++	}
+ 	if strings.HasPrefix(val, "-") || strings.HasSuffix(val, "-") {
+ 		return "", fmt.Errorf("Invalid index name (%s). Cannot begin or end with a hyphen.", val)
+ 	}
+@@ -223,7 +277,7 @@ func loadRepositoryName(reposName reference.Named) (string, reference.Named, err
+ 	if err := validateNoSchema(reposName.Name()); err != nil {
+ 		return "", nil, err
+ 	}
+-	indexName, remoteName, err := splitReposName(reposName)
++	indexName, remoteName, err := splitReposName(reposName, false)
+ 
+ 	if indexName, err = ValidateIndexName(indexName); err != nil {
+ 		return "", nil, err
+@@ -234,6 +288,13 @@ func loadRepositoryName(reposName reference.Named) (string, reference.Named, err
+ 	return indexName, remoteName, nil
+ }
+ 
++// IsReferenceFullyQualified determines whether the given reposName has prepended
++// name of index.
++func IsReferenceFullyQualified(reposName reference.Named) bool {
++	indexName, _, _ := splitReposName(reposName, false)
++	return indexName != ""
++}
++
+ // newIndexInfo returns IndexInfo configuration from indexName
+ func newIndexInfo(config *registrytypes.ServiceConfig, indexName string) (*registrytypes.IndexInfo, error) {
+ 	var err error
+@@ -251,9 +312,10 @@ func newIndexInfo(config *registrytypes.ServiceConfig, indexName string) (*regis
+ 	index := &registrytypes.IndexInfo{
+ 		Name:     indexName,
+ 		Mirrors:  make([]string, 0),
+-		Official: false,
++		Official: indexName == IndexName,
++		Secure:   isSecureIndex(config, indexName),
+ 	}
+-	index.Secure = isSecureIndex(config, indexName)
++
+ 	return index, nil
+ }
+ 
+@@ -267,14 +329,20 @@ func GetAuthConfigKey(index *registrytypes.IndexInfo) string {
+ }
+ 
+ // splitReposName breaks a reposName into an index name and remote name
+-func splitReposName(reposName reference.Named) (indexName string, remoteName reference.Named, err error) {
++// fixMissingIndex says to return current index server name if missing in
++// reposName
++func splitReposName(reposName reference.Named, fixMissingIndex bool) (indexName string, remoteName reference.Named, err error) {
+ 	var remoteNameStr string
+ 	indexName, remoteNameStr = reference.SplitHostname(reposName)
+ 	if indexName == "" || (!strings.Contains(indexName, ".") &&
+ 		!strings.Contains(indexName, ":") && indexName != "localhost") {
+ 		// This is a Docker Index repos (ex: samalba/hipache or ubuntu)
+ 		// 'docker.io'
+-		indexName = IndexName
++		if fixMissingIndex {
++			indexName = IndexServerName()
++		} else {
++			indexName = ""
++		}
+ 		remoteName = reposName
+ 	} else {
+ 		remoteName, err = reference.WithName(remoteNameStr)
+@@ -282,6 +350,23 @@ func splitReposName(reposName reference.Named) (indexName string, remoteName ref
+ 	return
+ }
+ 
++// IsIndexBlocked allows to check whether index/registry or endpoint
++// is on a block list.
++func IsIndexBlocked(indexName string) bool {
++	if _, ok := BlockedRegistries[indexName]; ok {
++		return true
++	}
++	if _, ok := BlockedRegistries["*"]; ok {
++		for _, name := range RegistryList {
++			if indexName == name {
++				return false
++			}
++		}
++		return true
++	}
++	return false
++}
++
+ // newRepositoryInfo validates and breaks down a repository name into a RepositoryInfo
+ func newRepositoryInfo(config *registrytypes.ServiceConfig, reposName reference.Named) (*RepositoryInfo, error) {
+ 	if err := validateNoSchema(reposName.Name()); err != nil {
+@@ -298,6 +383,9 @@ func newRepositoryInfo(config *registrytypes.ServiceConfig, reposName reference.
+ 	if err != nil {
+ 		return nil, err
+ 	}
++	if indexName == "" {
++		indexName = IndexServerName()
++	}
+ 
+ 	repoInfo.Index, err = newIndexInfo(config, indexName)
+ 	if err != nil {
+@@ -305,24 +393,28 @@ func newRepositoryInfo(config *registrytypes.ServiceConfig, reposName reference.
+ 	}
+ 
+ 	if repoInfo.Index.Official {
+-		repoInfo.LocalName, err = normalizeLibraryRepoName(repoInfo.RemoteName)
++		normalizedName, err := normalizeLibraryRepoName(repoInfo.RemoteName)
+ 		if err != nil {
+ 			return nil, err
+ 		}
+-		repoInfo.RemoteName = repoInfo.LocalName
++		repoInfo.RemoteName = normalizedName
+ 
+ 		// If the normalized name does not contain a '/' (e.g. "foo")
+ 		// then it is an official repo.
+ 		if strings.IndexRune(repoInfo.RemoteName.Name(), '/') == -1 {
+ 			repoInfo.Official = true
+ 			// Fix up remote name for official repos.
+-			repoInfo.RemoteName, err = reference.WithName("library/" + repoInfo.RemoteName.Name())
++			repoInfo.RemoteName, err = reference.WithName(OfficialReposNamePrefix + repoInfo.RemoteName.Name())
+ 			if err != nil {
+ 				return nil, err
+ 			}
+ 		}
+ 
+-		repoInfo.CanonicalName, err = reference.WithName("docker.io/" + repoInfo.RemoteName.Name())
++		repoInfo.CanonicalName, err = reference.WithName(IndexName + "/" + repoInfo.RemoteName.Name())
++		if err != nil {
++			return nil, err
++		}
++		repoInfo.LocalName, err = reference.WithName(repoInfo.Index.Name + "/" + normalizedName.Name())
+ 		if err != nil {
+ 			return nil, err
+ 		}
+@@ -357,13 +449,22 @@ func ParseSearchIndexInfo(reposName string) (*registrytypes.IndexInfo, error) {
+ // NormalizeLocalName transforms a repository name into a normalized LocalName
+ // Passes through the name without transformation on error (image id, etc)
+ // It does not use the repository info because we don't want to load
+-// the repository index and do request over the network.
+-func NormalizeLocalName(name reference.Named) reference.Named {
++// the repository index and do request over the network. Returned reference
++// will always be fully qualified unless an error occurs or there's no
++// default registry.
++func NormalizeLocalName(name reference.Named, keepUnqualified bool) reference.Named {
+ 	indexName, remoteName, err := loadRepositoryName(name)
+ 	if err != nil {
+ 		return name
+ 	}
+ 
++	fullyQualified := true
++	if indexName == "" {
++		indexName = IndexServerName()
++		fullyQualified = false
++	}
++	fullyQualify := !keepUnqualified || fullyQualified
++
+ 	var officialIndex bool
+ 	// Return any configured index info, first.
+ 	if index, ok := emptyServiceConfig.IndexConfigs[indexName]; ok {
+@@ -371,12 +472,23 @@ func NormalizeLocalName(name reference.Named) reference.Named {
+ 	}
+ 
+ 	if officialIndex {
+-		localName, err := normalizeLibraryRepoName(remoteName)
++		localName := remoteName
++		if fullyQualify {
++			localName, err = reference.WithName(IndexName + "/" + remoteName.Name())
++			if err != nil {
++				return name
++			}
++		}
++		localName, err = normalizeLibraryRepoName(localName)
+ 		if err != nil {
+ 			return name
+ 		}
+ 		return localName
+ 	}
++
++	if !fullyQualify {
++		indexName = ""
++	}
+ 	localName, err := localNameFromRemote(indexName, remoteName)
+ 	if err != nil {
+ 		return name
+@@ -387,24 +499,34 @@ func NormalizeLocalName(name reference.Named) reference.Named {
+ // normalizeLibraryRepoName removes the library prefix from
+ // the repository name for official repos.
+ func normalizeLibraryRepoName(name reference.Named) (reference.Named, error) {
+-	if strings.HasPrefix(name.Name(), "library/") {
+-		// If pull "library/foo", it's stored locally under "foo"
+-		return reference.WithName(strings.SplitN(name.Name(), "/", 2)[1])
++	indexName, remoteName, err := splitReposName(name, false)
++	if err != nil {
++		return nil, err
+ 	}
+-	return name, nil
++	remoteName, err = reference.WithName(strings.TrimPrefix(remoteName.Name(), OfficialReposNamePrefix))
++	if err != nil {
++		return nil, err
++	}
++	if indexName == "" {
++		return remoteName, nil
++	}
++	return reference.WithName(indexName + "/" + remoteName.Name())
+ }
+ 
+ // localNameFromRemote combines the index name and the repo remote name
+ // to generate a repo local name.
+ func localNameFromRemote(indexName string, remoteName reference.Named) (reference.Named, error) {
++	if indexName == "" {
++		return remoteName, nil
++	}
+ 	return reference.WithName(indexName + "/" + remoteName.Name())
+ }
+ 
+ // NormalizeLocalReference transforms a reference to use a normalized LocalName
+ // for the name poriton. Passes through the reference without transformation on
+ // error.
+-func NormalizeLocalReference(ref reference.Named) reference.Named {
+-	localName := NormalizeLocalName(ref)
++func NormalizeLocalReference(ref reference.Named, keepUnqualified bool) reference.Named {
++	localName := NormalizeLocalName(ref, keepUnqualified)
+ 	if tagged, isTagged := ref.(reference.Tagged); isTagged {
+ 		newRef, err := reference.WithTag(localName, tagged.Tag())
+ 		if err != nil {
+@@ -420,3 +542,54 @@ func NormalizeLocalReference(ref reference.Named) reference.Named {
+ 	}
+ 	return localName
+ }
++
++// FullyQualifyReferenceWith joins given index name with reference. If the
++// reference is already qualified or resulting reference is invalid, an error
++// will be returned.
++func FullyQualifyReferenceWith(indexName string, ref reference.Named) (reference.Named, error) {
++	if indexName == "" {
++		return nil, fmt.Errorf("index name cannot be empty")
++	}
++	fqn, err := reference.WithName(indexName + "/" + ref.Name())
++	if err != nil {
++		return nil, err
++	}
++	fqn = NormalizeLocalName(fqn, false)
++	if tagged, isTagged := ref.(reference.Tagged); isTagged {
++		newRef, err := reference.WithTag(fqn, tagged.Tag())
++		if err != nil {
++			return nil, err
++		}
++		return newRef, nil
++	} else if digested, isDigested := ref.(reference.Digested); isDigested {
++		newRef, err := reference.WithDigest(fqn, digested.Digest())
++		if err != nil {
++			return nil, err
++		}
++		return newRef, nil
++	}
++	return fqn, nil
++}
++
++// SubstituteReferenceName creates a new image reference from given ref with
++// its *name* part substituted for reposName.
++func SubstituteReferenceName(ref reference.Named, reposName string) (newRef reference.Named, err error) {
++	reposNameRef, err := reference.WithName(reposName)
++	if err != nil {
++		return nil, err
++	}
++	if tagged, isTagged := ref.(reference.Tagged); isTagged {
++		newRef, err = reference.WithTag(reposNameRef, tagged.Tag())
++		if err != nil {
++			return nil, err
++		}
++	} else if digested, isDigested := ref.(reference.Digested); isDigested {
++		newRef, err = reference.WithDigest(reposNameRef, digested.Digest())
++		if err != nil {
++			return nil, err
++		}
++	} else {
++		newRef = reposNameRef
++	}
++	return
++}
+diff --git a/registry/registry_mock_test.go b/registry/registry_mock_test.go
+index f45de5c..119bb7c 100644
+--- a/registry/registry_mock_test.go
++++ b/registry/registry_mock_test.go
+@@ -356,7 +356,7 @@ func handlerGetDeleteTags(w http.ResponseWriter, r *http.Request) {
+ 		apiError(w, "Could not parse repository", 400)
+ 		return
+ 	}
+-	repositoryName = NormalizeLocalName(repositoryName)
++	repositoryName = NormalizeLocalName(repositoryName, true)
+ 	tags, exists := testRepositories[repositoryName.String()]
+ 	if !exists {
+ 		apiError(w, "Repository not found", 404)
+@@ -380,7 +380,7 @@ func handlerGetTag(w http.ResponseWriter, r *http.Request) {
+ 		apiError(w, "Could not parse repository", 400)
+ 		return
+ 	}
+-	repositoryName = NormalizeLocalName(repositoryName)
++	repositoryName = NormalizeLocalName(repositoryName, true)
+ 	tagName := vars["tag"]
+ 	tags, exists := testRepositories[repositoryName.String()]
+ 	if !exists {
+@@ -405,7 +405,7 @@ func handlerPutTag(w http.ResponseWriter, r *http.Request) {
+ 		apiError(w, "Could not parse repository", 400)
+ 		return
+ 	}
+-	repositoryName = NormalizeLocalName(repositoryName)
++	repositoryName = NormalizeLocalName(repositoryName, true)
+ 	tagName := vars["tag"]
+ 	tags, exists := testRepositories[repositoryName.String()]
+ 	if !exists {
+diff --git a/registry/registry_test.go b/registry/registry_test.go
+index 7e35244..b21d6c1 100644
+--- a/registry/registry_test.go
++++ b/registry/registry_test.go
+@@ -370,7 +370,7 @@ func TestParseRepositoryInfo(t *testing.T) {
+ 				Official: true,
+ 			},
+ 			RemoteName:    withName("fooo/bar"),
+-			LocalName:     withName("fooo/bar"),
++			LocalName:     withName("docker.io/fooo/bar"),
+ 			CanonicalName: withName("docker.io/fooo/bar"),
+ 			Official:      false,
+ 		},
+@@ -380,7 +380,7 @@ func TestParseRepositoryInfo(t *testing.T) {
+ 				Official: true,
+ 			},
+ 			RemoteName:    withName("library/ubuntu"),
+-			LocalName:     withName("ubuntu"),
++			LocalName:     withName("docker.io/ubuntu"),
+ 			CanonicalName: withName("docker.io/library/ubuntu"),
+ 			Official:      true,
+ 		},
+@@ -390,7 +390,7 @@ func TestParseRepositoryInfo(t *testing.T) {
+ 				Official: true,
+ 			},
+ 			RemoteName:    withName("nonlibrary/ubuntu"),
+-			LocalName:     withName("nonlibrary/ubuntu"),
++			LocalName:     withName("docker.io/nonlibrary/ubuntu"),
+ 			CanonicalName: withName("docker.io/nonlibrary/ubuntu"),
+ 			Official:      false,
+ 		},
+@@ -400,7 +400,7 @@ func TestParseRepositoryInfo(t *testing.T) {
+ 				Official: true,
+ 			},
+ 			RemoteName:    withName("library/ubuntu"),
+-			LocalName:     withName("ubuntu"),
++			LocalName:     withName("docker.io/ubuntu"),
+ 			CanonicalName: withName("docker.io/library/ubuntu"),
+ 			Official:      true,
+ 		},
+@@ -410,7 +410,7 @@ func TestParseRepositoryInfo(t *testing.T) {
+ 				Official: true,
+ 			},
+ 			RemoteName:    withName("other/library"),
+-			LocalName:     withName("other/library"),
++			LocalName:     withName("docker.io/other/library"),
+ 			CanonicalName: withName("docker.io/other/library"),
+ 			Official:      false,
+ 		},
+@@ -520,7 +520,7 @@ func TestParseRepositoryInfo(t *testing.T) {
+ 				Official: true,
+ 			},
+ 			RemoteName:    withName("public/moonbase"),
+-			LocalName:     withName("public/moonbase"),
++			LocalName:     withName("docker.io/public/moonbase"),
+ 			CanonicalName: withName("docker.io/public/moonbase"),
+ 			Official:      false,
+ 		},
+@@ -530,7 +530,7 @@ func TestParseRepositoryInfo(t *testing.T) {
+ 				Official: true,
+ 			},
+ 			RemoteName:    withName("public/moonbase"),
+-			LocalName:     withName("public/moonbase"),
++			LocalName:     withName("docker.io/public/moonbase"),
+ 			CanonicalName: withName("docker.io/public/moonbase"),
+ 			Official:      false,
+ 		},
+@@ -540,7 +540,7 @@ func TestParseRepositoryInfo(t *testing.T) {
+ 				Official: true,
+ 			},
+ 			RemoteName:    withName("library/ubuntu-12.04-base"),
+-			LocalName:     withName("ubuntu-12.04-base"),
++			LocalName:     withName("docker.io/ubuntu-12.04-base"),
+ 			CanonicalName: withName("docker.io/library/ubuntu-12.04-base"),
+ 			Official:      true,
+ 		},
+@@ -550,7 +550,7 @@ func TestParseRepositoryInfo(t *testing.T) {
+ 				Official: true,
+ 			},
+ 			RemoteName:    withName("library/ubuntu-12.04-base"),
+-			LocalName:     withName("ubuntu-12.04-base"),
++			LocalName:     withName("docker.io/ubuntu-12.04-base"),
+ 			CanonicalName: withName("docker.io/library/ubuntu-12.04-base"),
+ 			Official:      true,
+ 		},
+@@ -560,7 +560,7 @@ func TestParseRepositoryInfo(t *testing.T) {
+ 				Official: true,
+ 			},
+ 			RemoteName:    withName("library/ubuntu-12.04-base"),
+-			LocalName:     withName("ubuntu-12.04-base"),
++			LocalName:     withName("docker.io/ubuntu-12.04-base"),
+ 			CanonicalName: withName("docker.io/library/ubuntu-12.04-base"),
+ 			Official:      true,
+ 		},
+diff --git a/registry/service.go b/registry/service.go
+index b826f11..6eab776 100644
+--- a/registry/service.go
++++ b/registry/service.go
+@@ -2,6 +2,7 @@ package registry
+ 
+ import (
+ 	"crypto/tls"
++	"fmt"
+ 	"net/http"
+ 	"net/url"
+ 	"strings"
+@@ -33,7 +34,10 @@ func (s *Service) Auth(authConfig *types.AuthConfig) (string, error) {
+ 	addr := authConfig.ServerAddress
+ 	if addr == "" {
+ 		// Use the official registry address if not specified.
+-		addr = IndexServer
++		addr = IndexServerAddress()
++	}
++	if addr == "" {
++		return "", fmt.Errorf("No configured registry to authenticate to.")
+ 	}
+ 	index, err := s.ResolveIndex(addr)
+ 	if err != nil {
+@@ -98,7 +102,7 @@ func (s *Service) Search(term string, authConfig *types.AuthConfig, headers map[
+ 
+ 	if index.Official {
+ 		localName := remoteName
+-		if strings.HasPrefix(localName, "library/") {
++		if strings.HasPrefix(localName, OfficialReposNamePrefix) {
+ 			// If pull "library/foo", it's stored locally under "foo"
+ 			localName = strings.SplitN(localName, "/", 2)[1]
+ 		}
+@@ -177,15 +181,18 @@ func (s *Service) lookupEndpoints(repoName reference.Named) (endpoints []APIEndp
+ 		return nil, err
+ 	}
+ 
+-	if V2Only {
+-		return endpoints, nil
++	if !V2Only {
++		legacyEndpoints, err := s.lookupV1Endpoints(repoName)
++		if err != nil {
++			return nil, err
++		}
++		endpoints = append(endpoints, legacyEndpoints...)
+ 	}
+ 
+-	legacyEndpoints, err := s.lookupV1Endpoints(repoName)
+-	if err != nil {
+-		return nil, err
++	filtered := filterBlockedEndpoints(endpoints)
++	if len(filtered) == 0 && len(endpoints) > 0 {
++		return nil, fmt.Errorf("All endpoints blocked.")
+ 	}
+-	endpoints = append(endpoints, legacyEndpoints...)
+ 
+-	return endpoints, nil
++	return filtered, nil
+ }
+diff --git a/registry/session.go b/registry/session.go
+index 102263b..34eecc4 100644
+--- a/registry/session.go
++++ b/registry/session.go
+@@ -177,6 +177,10 @@ func NewSession(client *http.Client, authConfig *types.AuthConfig, endpoint *End
+ 		}
+ 	}
+ 
++	if endpoint != nil && isEndpointURLBlocked(endpoint.URL.Host) {
++		return nil, fmt.Errorf("Index %q is blocked.", endpoint.URL.Host)
++	}
++
+ 	r = &Session{
+ 		authConfig:    authConfig,
+ 		client:        client,
+@@ -321,6 +325,31 @@ func (r *Session) GetRemoteImageLayer(imgID, registry string, imgSize int64) (io
+ 	return res.Body, nil
+ }
+ 
++func isEndpointURLBlocked(endpoint string) bool {
++	if parsedURL, err := url.Parse(endpoint); err == nil {
++		if !IsIndexBlocked(parsedURL.Host) {
++			return false
++		}
++	}
++	return true
++}
++
++func isEndpointBlocked(endpoint APIEndpoint) bool {
++	return isEndpointURLBlocked(endpoint.URL)
++}
++
++func filterBlockedEndpoints(endpoints []APIEndpoint) []APIEndpoint {
++	res := []APIEndpoint{}
++	for _, endpoint := range endpoints {
++		if !isEndpointBlocked(endpoint) {
++			res = append(res, endpoint)
++		} else {
++			logrus.Infof("Skipping blocked endpoint %q", endpoint.URL)
++		}
++	}
++	return res
++}
++
+ // GetRemoteTag retrieves the tag named in the askedTag argument from the given
+ // repository. It queries each of the registries supplied in the registries
+ // argument, and returns data from the first one that answers the query
+@@ -328,12 +357,16 @@ func (r *Session) GetRemoteImageLayer(imgID, registry string, imgSize int64) (io
+ func (r *Session) GetRemoteTag(registries []string, repositoryRef reference.Named, askedTag string) (string, error) {
+ 	repository := repositoryRef.Name()
+ 
+-	if strings.Count(repository, "/") == 0 {
+-		// This will be removed once the registry supports auto-resolution on
+-		// the "library" namespace
+-		repository = "library/" + repository
+-	}
+ 	for _, host := range registries {
++		if host == IndexServer && strings.Count(repository, "/") == 0 {
++			// This will be removed once the registry supports auto-resolution on
++			// the "library" namespace
++			repository = OfficialReposNamePrefix + repository
++		}
++		if isEndpointURLBlocked(host) {
++			logrus.Errorf("Cannot query blocked registry at %s for remote tags.", host)
++			continue
++		}
+ 		endpoint := fmt.Sprintf("%srepositories/%s/tags/%s", host, repository, askedTag)
+ 		res, err := r.client.Get(endpoint)
+ 		if err != nil {
+@@ -366,12 +399,16 @@ func (r *Session) GetRemoteTag(registries []string, repositoryRef reference.Name
+ func (r *Session) GetRemoteTags(registries []string, repositoryRef reference.Named) (map[string]string, error) {
+ 	repository := repositoryRef.Name()
+ 
+-	if strings.Count(repository, "/") == 0 {
+-		// This will be removed once the registry supports auto-resolution on
+-		// the "library" namespace
+-		repository = "library/" + repository
+-	}
+ 	for _, host := range registries {
++		if host == IndexServer && strings.Count(repository, "/") == 0 {
++			// This will be removed once the registry supports auto-resolution on
++			// the "library" namespace
++			repository = OfficialReposNamePrefix + repository
++		}
++		if isEndpointURLBlocked(host) {
++			logrus.Errorf("Cannot query blocked registry at %s for remote tags.", host)
++			continue
++		}
+ 		endpoint := fmt.Sprintf("%srepositories/%s/tags", host, repository)
+ 		res, err := r.client.Get(endpoint)
+ 		if err != nil {
+diff --git a/tag/store.go b/tag/store.go
+index f09db74..dc33e2e 100644
+--- a/tag/store.go
++++ b/tag/store.go
+@@ -10,9 +10,11 @@ import (
+ 	"sort"
+ 	"sync"
+ 
++	"github.com/Sirupsen/logrus"
+ 	"github.com/docker/distribution/digest"
+ 	"github.com/docker/distribution/reference"
+ 	"github.com/docker/docker/image"
++	"github.com/docker/docker/registry"
+ )
+ 
+ // DefaultTag defines the default tag used when performing images related actions and no tag string is specified
+@@ -56,6 +58,11 @@ type store struct {
+ // including the repository name.
+ type repository map[string]image.ID
+ 
++type namedRepository struct {
++	name       string
++	repository repository
++}
++
+ type lexicalRefs []reference.Named
+ 
+ func (a lexicalRefs) Len() int           { return len(a) }
+@@ -171,26 +178,27 @@ func (store *store) Delete(ref reference.Named) (bool, error) {
+ 	store.mu.Lock()
+ 	defer store.mu.Unlock()
+ 
+-	repoName := ref.Name()
+-
+-	repository, exists := store.Repositories[repoName]
+-	if !exists {
+-		return false, ErrDoesNotExist
+-	}
+-
+-	refStr := ref.String()
+-	if id, exists := repository[refStr]; exists {
+-		delete(repository, refStr)
+-		if len(repository) == 0 {
+-			delete(store.Repositories, repoName)
++	matching := store.getMatchingRepositoryList(ref)
++	for _, namedRepo := range matching {
++		tmpRef, err := registry.SubstituteReferenceName(ref, namedRepo.name)
++		if err != nil {
++			logrus.Debugf("failed to substitute name %q in %q for %q", ref.Name, ref.String(), namedRepo.name)
++			continue
+ 		}
+-		if store.referencesByIDCache[id] != nil {
+-			delete(store.referencesByIDCache[id], refStr)
+-			if len(store.referencesByIDCache[id]) == 0 {
+-				delete(store.referencesByIDCache, id)
++		refStr := tmpRef.String()
++		if id, exists := namedRepo.repository[refStr]; exists {
++			delete(namedRepo.repository, refStr)
++			if len(namedRepo.repository) == 0 {
++				delete(store.Repositories, namedRepo.name)
++			}
++			if store.referencesByIDCache[id] != nil {
++				delete(store.referencesByIDCache[id], refStr)
++				if len(store.referencesByIDCache[id]) == 0 {
++					delete(store.referencesByIDCache, id)
++				}
+ 			}
++			return true, store.save()
+ 		}
+-		return true, store.save()
+ 	}
+ 
+ 	return false, ErrDoesNotExist
+@@ -203,17 +211,19 @@ func (store *store) Get(ref reference.Named) (image.ID, error) {
+ 	store.mu.RLock()
+ 	defer store.mu.RUnlock()
+ 
+-	repository, exists := store.Repositories[ref.Name()]
+-	if !exists || repository == nil {
+-		return "", ErrDoesNotExist
+-	}
+-
+-	id, exists := repository[ref.String()]
+-	if !exists {
+-		return "", ErrDoesNotExist
++	matching := store.getMatchingRepositoryList(ref)
++	for _, namedRepo := range matching {
++		tmpRef, err := registry.SubstituteReferenceName(ref, namedRepo.name)
++		if err != nil {
++			logrus.Debugf("failed to substitute name %q in %q for %q", ref.Name, ref.String(), namedRepo.name)
++			continue
++		}
++		if revision, exists := namedRepo.repository[tmpRef.String()]; exists {
++			return revision, nil
++		}
+ 	}
+ 
+-	return id, nil
++	return "", ErrDoesNotExist
+ }
+ 
+ // References returns a slice of references to the given image ID. The slice
+@@ -243,13 +253,15 @@ func (store *store) ReferencesByName(ref reference.Named) []Association {
+ 	store.mu.RLock()
+ 	defer store.mu.RUnlock()
+ 
+-	repository, exists := store.Repositories[ref.Name()]
+-	if !exists {
++	matching := store.getMatchingRepositoryList(ref)
++	if len(matching) == 0 {
+ 		return nil
+ 	}
++	// the first matching is the best match
++	namedRepo := matching[0]
+ 
+ 	var associations []Association
+-	for refStr, refID := range repository {
++	for refStr, refID := range namedRepo.repository {
+ 		ref, err := reference.ParseNamed(refStr)
+ 		if err != nil {
+ 			// Should never happen
+@@ -313,3 +325,56 @@ func (store *store) reload() error {
+ 
+ 	return nil
+ }
++
++// getMatchingRepositoryList returns a list of local repositories matching
++// given repository name. Results will be sorted in following way:
++//   1. precise match
++//   2. precise match after normalization
++//   3. match after prefixing with default registry name and normalization
++// *Default registry* here means any registry in registry.RegistryList.
++func (store *store) getMatchingRepositoryList(ref reference.Named) (result []namedRepository) {
++	repoMap := map[string]struct{}{}
++	addResult := func(name string, repo repository) bool {
++		if _, exists := repoMap[name]; exists {
++			return false
++		}
++		result = append(result, namedRepository{
++			name:       name,
++			repository: repo,
++		})
++		repoMap[name] = struct{}{}
++		return true
++	}
++
++	// precise match
++	repoName := ref.Name()
++	if r, exists := store.Repositories[repoName]; exists {
++		addResult(repoName, r)
++	}
++
++	// precise match after normalization
++	for _, keepUnqualified := range []bool{false, true} {
++		normalized := registry.NormalizeLocalName(ref, keepUnqualified).Name()
++		if r, exists := store.Repositories[normalized]; exists {
++			addResult(normalized, r)
++		}
++	}
++
++	if !registry.IsReferenceFullyQualified(ref) {
++		// match after prefixing with default registry and normalization
++		for i := 0; i < len(registry.RegistryList); i++ {
++			if i < 1 {
++				continue // the first registry has been already processed
++			}
++			fqRef, err := registry.FullyQualifyReferenceWith(registry.RegistryList[i], ref)
++			if err != nil {
++				continue
++			}
++			if r, exists := store.Repositories[fqRef.Name()]; exists {
++				addResult(fqRef.Name(), r)
++			}
++		}
++	}
++
++	return
++}

@@ -1,0 +1,19 @@
+Fixed docker's authentication issue
+
+Docker client sends configuration file with stored credentials together
+with several requests to Docker daemon. Daemon then takes the first
+authentication information and tries to use it against any registry it
+contacts. This results in authentication errors while trying pull from
+any registry but the one stored first in configuration file. This patch
+checks, whether the given credentials belong to desired endpoint before
+creating an new session.
+
+This is just a workaround. Robust solution would be to iterate over all
+available authentication data and choose the right ones for registry
+currently processed. And client would have to pass all possibly needed
+credentials to docker daemon with any request (it does so only in rare
+cases like docker build).
+
+Signed-off-by: Michal Minar <miminar@redhat.com>
+
+Signed-off-by: Dan Walsh <dwalsh@redhat.com>
