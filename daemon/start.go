@@ -140,6 +140,11 @@ func (daemon *Daemon) containerStart(container *container.Container) (err error)
 	}
 	mounts = append(mounts, container.IpcMounts()...)
 	mounts = append(mounts, container.TmpfsMounts()...)
+	m, err := container.SecretMount()
+	if err != nil {
+		return err
+	}
+	mounts = append(mounts, m)
 
 	container.Command.Mounts = mounts
 
