@@ -243,7 +243,12 @@ func (d *Driver) subvolumesDirID(id string) string {
 }
 
 // Create the filesystem with given id.
-func (d *Driver) Create(id, parent, mountLabel string) error {
+func (d *Driver) Create(id, parent, mountLabel string, storageOpt []string) error {
+
+	if storageOpt != nil {
+		return fmt.Errorf("--storage-opt is not supported for btrfs")
+	}
+
 	subvolumes := path.Join(d.home, "subvolumes")
 	rootUID, rootGID, err := idtools.GetRootUIDGID(d.uidMaps, d.gidMaps)
 	if err != nil {

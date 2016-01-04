@@ -1484,6 +1484,7 @@ _docker_run() {
 		--publish -p
 		--restart
 		--security-opt
+		--storage-opt
 		--stop-signal
 		--tmpfs
 		--ulimit

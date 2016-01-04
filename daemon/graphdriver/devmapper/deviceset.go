@@ -807,7 +807,7 @@ func (devices *DeviceSet) createRegisterDevice(hash string) (*devInfo, error) {
 	return info, nil
 }
 
-func (devices *DeviceSet) createRegisterSnapDevice(hash string, baseInfo *devInfo) error {
+func (devices *DeviceSet) createRegisterSnapDevice(hash string, baseInfo *devInfo, size uint64) error {
 	deviceID, err := devices.getNextFreeDeviceID()
 	if err != nil {
 		return err
@@ -842,7 +842,15 @@ func (devices *DeviceSet) createRegisterSnapDevice(hash string, baseInfo *devInf
 		break
 	}
 
-	if _, err := devices.registerDevice(deviceID, hash, baseInfo.Size, devices.OpenTransactionID); err != nil {
+	if size == 0 {
+		size = baseInfo.Size
+	}
+
+	if size < baseInfo.Size {
+		return fmt.Errorf("devmapper: Container size cannot be smaller than %dG", baseInfo.Size/(1024*1024*1024))
+	}
+
+	if _, err := devices.registerDevice(deviceID, hash, size, devices.OpenTransactionID); err != nil {
 		devicemapper.DeleteDevice(devices.getPoolDevName(), deviceID)
 		devices.markDeviceIDFree(deviceID)
 		logrus.Debugf("devmapper: Error registering device: %s", err)
@@ -1718,7 +1726,7 @@ func (devices *DeviceSet) initDevmapper(doInit bool) error {
 }
 
 // AddDevice adds a device and registers in the hash.
-func (devices *DeviceSet) AddDevice(hash, baseHash string) error {
+func (devices *DeviceSet) AddDevice(hash, baseHash string, storageOpt []string) error {
 	logrus.Debugf("devmapper: AddDevice(hash=%s basehash=%s)", hash, baseHash)
 	defer logrus.Debugf("devmapper: AddDevice(hash=%s basehash=%s) END", hash, baseHash)
 
@@ -1744,8 +1752,97 @@ func (devices *DeviceSet) AddDevice(hash, baseHash string) error {
 		return fmt.Errorf("devmapper: device %s already exists. Deleted=%v", hash, info.Deleted)
 	}
 
-	if err := devices.createRegisterSnapDevice(hash, baseInfo); err != nil {
+	devinfo := &devInfo{}
+
+	if err := devices.parseStorageOpt(storageOpt, devinfo); err != nil {
 		return err
+	}
+
+	if err := devices.createRegisterSnapDevice(hash, baseInfo, devinfo.Size); err != nil {
+		return err
+	}
+
+	// Grow the container rootfs.
+	if devinfo.Size > 0 {
+		if err := devices.growFS(hash); err != nil {
+			return err
+		}
+	}
+
+	return nil
+}
+
+func (devices *DeviceSet) parseStorageOpt(storageOpt []string, devinfo *devInfo) error {
+
+	// Read size to change the block device size per container.
+	var size int64
+	var err error
+	for _, option := range storageOpt {
+		val := strings.SplitN(option, ":", 2)
+		key := strings.ToLower(val[0])
+		switch key {
+		case "size":
+			size, err = units.RAMInBytes(val[1])
+			if err != nil {
+				return err
+			}
+			devinfo.Size = uint64(size)
+		default:
+			return fmt.Errorf("Unknown option %s\n", key)
+		}
+	}
+
+	return nil
+}
+
+func (devices *DeviceSet) growFS(hash string) error {
+
+	info, err := devices.lookupDevice(hash)
+	if info == nil {
+		return fmt.Errorf("Failed to lookup device %s:%v", hash, err)
+	}
+
+	info.lock.Lock()
+	defer info.lock.Unlock()
+
+	if err := devices.activateDeviceIfNeeded(info, false); err != nil {
+		return fmt.Errorf("Error activating devmapper device for '%s': %s", hash, err)
+	}
+
+	defer devices.deactivateDevice(info)
+
+	fsMountPoint := "/run/docker/mnt"
+	if _, err := os.Stat(fsMountPoint); os.IsNotExist(err) {
+		if err := os.MkdirAll(fsMountPoint, 0700); err != nil {
+			return err
+		}
+		defer os.RemoveAll(fsMountPoint)
+	}
+
+	options := ""
+	if devices.BaseDeviceFilesystem == "xfs" {
+		// XFS needs nouuid or it can't mount filesystems with the same fs
+		options = joinMountOptions(options, "nouuid")
+	}
+	options = joinMountOptions(options, devices.mountOptions)
+
+	if err := mount.Mount(info.DevName(), fsMountPoint, devices.BaseDeviceFilesystem, options); err != nil {
+		return fmt.Errorf("Error mounting '%s' on '%s': %s", info.DevName(), fsMountPoint, err)
+	}
+
+	defer syscall.Unmount(fsMountPoint, syscall.MNT_DETACH)
+
+	switch devices.BaseDeviceFilesystem {
+	case "ext4":
+		if out, err := exec.Command("resize2fs", info.DevName()).CombinedOutput(); err != nil {
+			logrus.Debugf("Failed to grow rootfs:%v:%s", err, string(out))
+		}
+	case "xfs":
+		if out, err := exec.Command("xfs_growfs", info.DevName()).CombinedOutput(); err != nil {
+			logrus.Debugf("Failed to grow rootfs:%v:%s", err, string(out))
+		}
+	default:
+		err = fmt.Errorf("Unsupported filesystem type %s", devices.BaseDeviceFilesystem)
 	}
 
 	return nil

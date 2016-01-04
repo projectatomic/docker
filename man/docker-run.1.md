@@ -62,6 +62,7 @@ docker-run - Run a command in a new container
 [**--restart**[=*RESTART*]]
 [**--rm**]
 [**--security-opt**[=*[]*]]
+[**--storage-opt**[=*[]*]]
 [**--stop-signal**[=*SIGNAL*]]
 [**--shm-size**[=*[]*]]
 [**--sig-proxy**[=*true*]]
@@ -444,6 +445,11 @@ its root filesystem mounted as read only prohibiting any writes.
     "label:level:LEVEL" : Set the label level for the container
     "label:disable"     : Turn off label confinement for the container
 
+**--storage-opt**=[]
+   Storage driver options per container
+   $ docker run -it --storage-opt size:120G fedora /bin/bash 
+   This (size) will allow to set the container rootfs size to 120G at creation time. User cannot pass a size less than the Default BaseFS Size.
+  
 **--stop-signal**=*SIGTERM*
   Signal to stop a container. Default is SIGTERM.
 

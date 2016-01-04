@@ -49,6 +49,7 @@ func Parse(cmd *flag.FlagSet, args []string) (*container.Config, *container.Host
 		flCapDrop           = opts.NewListOpts(nil)
 		flGroupAdd          = opts.NewListOpts(nil)
 		flSecurityOpt       = opts.NewListOpts(nil)
+		flStorageOpt        = opts.NewListOpts(nil)
 		flLabelsFile        = opts.NewListOpts(nil)
 		flLoggingOpts       = opts.NewListOpts(nil)
 		flPrivileged        = cmd.Bool([]string{"-privileged"}, false, "Give extended privileges to this container")
@@ -113,6 +114,7 @@ func Parse(cmd *flag.FlagSet, args []string) (*container.Config, *container.Host
 	cmd.Var(&flCapDrop, []string{"-cap-drop"}, "Drop Linux capabilities")
 	cmd.Var(&flGroupAdd, []string{"-group-add"}, "Add additional groups to join")
 	cmd.Var(&flSecurityOpt, []string{"-security-opt"}, "Security Options")
+	cmd.Var(&flStorageOpt, []string{"-storage-opt"}, "Set storage driver options per container")
 	cmd.Var(flUlimits, []string{"-ulimit"}, "Ulimit options")
 	cmd.Var(&flLoggingOpts, []string{"-log-opt"}, "Log driver options")
 
@@ -392,6 +394,7 @@ func Parse(cmd *flag.FlagSet, args []string) (*container.Config, *container.Host
 		GroupAdd:       flGroupAdd.GetAll(),
 		RestartPolicy:  restartPolicy,
 		SecurityOpt:    flSecurityOpt.GetAll(),
+		StorageOpt:     flStorageOpt.GetAll(),
 		ReadonlyRootfs: *flReadonlyRootfs,
 		LogConfig:      container.LogConfig{Type: *flLoggingDriver, Config: loggingOpts},
 		VolumeDriver:   *flVolumeDriver,
