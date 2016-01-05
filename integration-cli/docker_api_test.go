@@ -5,6 +5,7 @@ import (
 	"net/http/httptest"
 	"net/http/httputil"
 	"os/exec"
+	"regexp"
 	"strconv"
 	"strings"
 	"time"
@@ -92,7 +93,8 @@ func (s *DockerSuite) TestApiDockerApiVersion(c *check.C) {
 
 	c.Assert(svrVersion, check.Equals, "/vxxx/version")
 
-	if !strings.Contains(out, "API version:  xxx") {
+	versionre := regexp.MustCompile(`API version:[\s]*xxx`)
+	if !versionre.MatchString(out) {
 		c.Fatalf("Out didn't have 'xxx' for the API version, had:\n%s", out)
 	}
 }
