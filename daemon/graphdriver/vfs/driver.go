@@ -69,7 +69,12 @@ func (d *Driver) Cleanup() error {
 }
 
 // Create prepares the filesystem for the VFS driver and copies the directory for the given id under the parent.
-func (d *Driver) Create(id, parent, mountLabel string) error {
+func (d *Driver) Create(id, parent, mountLabel string, storageOpt []string) error {
+
+	if storageOpt != nil {
+		return fmt.Errorf("--storage-opt is not supported for vfs")
+	}
+
 	dir := d.dir(id)
 	rootUID, rootGID, err := idtools.GetRootUIDGID(d.uidMaps, d.gidMaps)
 	if err != nil {

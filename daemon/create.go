@@ -77,6 +77,8 @@ func (daemon *Daemon) create(params types.ContainerCreateConfig) (retC *containe
 		return nil, err
 	}
 
+	container.HostConfig.StorageOpt = params.HostConfig.StorageOpt
+
 	// Set RWLayer for container after mount labels have been set
 	if err := daemon.setRWLayer(container); err != nil {
 		return nil, err
@@ -144,7 +146,7 @@ func (daemon *Daemon) setRWLayer(container *container.Container) error {
 		}
 		layerID = img.RootFS.ChainID()
 	}
-	rwLayer, err := daemon.layerStore.CreateRWLayer(container.ID, layerID, container.MountLabel, daemon.setupInitLayer)
+	rwLayer, err := daemon.layerStore.CreateRWLayer(container.ID, layerID, container.MountLabel, daemon.setupInitLayer, container.HostConfig.StorageOpt)
 	if err != nil {
 		return err
 	}
