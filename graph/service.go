@@ -19,7 +19,7 @@ import (
 // function.
 type LookupRemoteConfig struct {
 	MetaHeaders map[string][]string
-	AuthConfig  *cliconfig.AuthConfig
+	AuthConfigs map[string]cliconfig.AuthConfig
 }
 
 // ManifestFetcher allows to pull image's json without any binary blobs.

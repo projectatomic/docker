@@ -15,29 +15,54 @@ import (
 const v2binary = "registry-v2"
 
 type testRegistryV2 struct {
-	cmd *exec.Cmd
-	url string
-	dir string
+	cmd      *exec.Cmd
+	url      string
+	dir      string
+	username string
+	password string
+	email    string
 }
 
-func newTestRegistryV2At(c *check.C, url string) (*testRegistryV2, error) {
+func newTestRegistryV2At(c *check.C, url string, auth bool) (*testRegistryV2, error) {
+	tmp, err := ioutil.TempDir("", "registry-test-")
+	if err != nil {
+		return nil, err
+	}
 	template := `version: 0.1
 loglevel: debug
 storage:
     filesystem:
         rootdirectory: %s
 http:
-    addr: %s`
-	tmp, err := ioutil.TempDir("", "registry-test-")
-	if err != nil {
-		return nil, err
+    addr: %s
+%s`
+	var (
+		htpasswd string
+		username string
+		password string
+		email    string
+	)
+	if auth {
+		htpasswdPath := filepath.Join(tmp, "htpasswd")
+		userpasswd := "testuser:$2y$05$sBsSqk0OpSD1uTZkHXc4FeJ0Z70wLQdAX/82UiHuQOKbNbBrzs63m"
+		username = "testuser"
+		password = "testpassword"
+		email = "test@test.org"
+		if err := ioutil.WriteFile(htpasswdPath, []byte(userpasswd), os.FileMode(0644)); err != nil {
+			return nil, err
+		}
+		htpasswd = fmt.Sprintf(`auth:
+    htpasswd:
+        realm: basic-realm
+        path: %s
+`, htpasswdPath)
 	}
 	confPath := filepath.Join(tmp, "config.yaml")
 	config, err := os.Create(confPath)
 	if err != nil {
 		return nil, err
 	}
-	if _, err := fmt.Fprintf(config, template, tmp, url); err != nil {
+	if _, err := fmt.Fprintf(config, template, tmp, url, htpasswd); err != nil {
 		os.RemoveAll(tmp)
 		return nil, err
 	}
@@ -51,14 +76,13 @@ http:
 		return nil, err
 	}
 	return &testRegistryV2{
-		cmd: cmd,
-		url: url,
-		dir: tmp,
+		cmd:      cmd,
+		url:      url,
+		dir:      tmp,
+		username: username,
+		password: password,
+		email:    email,
 	}, nil
-}
-
-func newTestRegistryV2(c *check.C) (*testRegistryV2, error) {
-	return newTestRegistryV2At(c, privateRegistryURL)
 }
 
 func (t *testRegistryV2) Ping() error {
@@ -67,7 +91,7 @@ func (t *testRegistryV2) Ping() error {
 	if err != nil {
 		return err
 	}
-	if resp.StatusCode != 200 {
+	if resp.StatusCode != http.StatusOK && resp.StatusCode != http.StatusUnauthorized {
 		return fmt.Errorf("registry ping replied with an unexpected status code %d", resp.StatusCode)
 	}
 	return nil

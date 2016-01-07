@@ -528,7 +528,7 @@ func (d *Daemon) sockRequest(method, endpoint string, data interface{}) (int, []
 		return -1, nil, err
 	}
 
-	res, body, err := d.sockRequestRaw(method, endpoint, jsonData, "application/json")
+	res, body, err := d.sockRequestRaw(method, endpoint, jsonData, "application/json", nil)
 	if err != nil {
 		return -1, nil, err
 	}
@@ -536,10 +536,13 @@ func (d *Daemon) sockRequest(method, endpoint string, data interface{}) (int, []
 	return res.StatusCode, b, err
 }
 
-func (d *Daemon) sockRequestRaw(method, endpoint string, data io.Reader, ct string) (*http.Response, io.ReadCloser, error) {
+func (d *Daemon) sockRequestRaw(method, endpoint string, data io.Reader, ct string, headers map[string]string) (*http.Response, io.ReadCloser, error) {
 	req, client, err := d.newRequestClient(method, endpoint, data, ct)
 	if err != nil {
 		return nil, nil, err
+	}
+	for k, v := range headers {
+		req.Header.Add(k, v)
 	}
 
 	resp, err := client.Do(req)
@@ -1628,9 +1631,9 @@ func daemonTime(c *check.C) time.Time {
 	return dt
 }
 
-func setupRegistryAt(c *check.C, url string) *testRegistryV2 {
+func setupRegistryAt(c *check.C, url string, auth bool) *testRegistryV2 {
 	testRequires(c, RegistryHosting)
-	reg, err := newTestRegistryV2At(c, url)
+	reg, err := newTestRegistryV2At(c, url, auth)
 	c.Assert(err, check.IsNil)
 
 	// Wait for registry to be ready to serve requests.
@@ -1648,7 +1651,7 @@ func setupRegistryAt(c *check.C, url string) *testRegistryV2 {
 }
 
 func setupRegistry(c *check.C) *testRegistryV2 {
-	return setupRegistryAt(c, privateRegistryURL)
+	return setupRegistryAt(c, privateRegistryURL, false)
 }
 
 func setupNotary(c *check.C) *testNotary {

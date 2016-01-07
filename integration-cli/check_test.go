@@ -116,24 +116,32 @@ func (s *DockerTrustSuite) TearDownTest(c *check.C) {
 }
 
 type DockerRegistriesSuite struct {
-	ds   *DockerSuite
-	reg1 *testRegistryV2
-	reg2 *testRegistryV2
-	d    *Daemon
+	ds          *DockerSuite
+	reg1        *testRegistryV2
+	reg2        *testRegistryV2
+	regWithAuth *testRegistryV2
+	d           *Daemon
 }
 
 func (s *DockerRegistriesSuite) SetUpTest(c *check.C) {
-	s.reg1 = setupRegistryAt(c, privateRegistryURL)
-	s.reg2 = setupRegistryAt(c, privateRegistryURL2)
+	s.reg1 = setupRegistryAt(c, privateRegistryURL, false)
+	s.reg2 = setupRegistryAt(c, privateRegistryURL2, false)
+	s.regWithAuth = setupRegistryAt(c, privateRegistryURL3, true)
 	s.d = NewDaemon(c)
 }
 
 func (s *DockerRegistriesSuite) TearDownTest(c *check.C) {
+	if s.reg1 != nil {
+		s.reg1.Close()
+	}
 	if s.reg2 != nil {
 		s.reg2.Close()
 	}
-	if s.reg1 != nil {
-		s.reg1.Close()
+	if s.regWithAuth != nil {
+		if _, err := s.d.Cmd("logout", s.regWithAuth.url); err != nil {
+			c.Fatalf("could not logout from %s", s.regWithAuth.url)
+		}
+		s.regWithAuth.Close()
 	}
 	if s.d != nil {
 		s.d.Stop()

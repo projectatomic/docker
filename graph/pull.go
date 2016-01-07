@@ -17,9 +17,9 @@ type ImagePullConfig struct {
 	// MetaHeaders stores HTTP headers with metadata about the image
 	// (DockerHeaders with prefix X-Meta- in the request).
 	MetaHeaders map[string][]string
-	// AuthConfig holds authentication credentials for authenticating with
-	// the registry.
-	AuthConfig *cliconfig.AuthConfig
+	// AuthConfigs holds authentication credentials for authenticating with
+	// all the registries.
+	AuthConfigs map[string]cliconfig.AuthConfig
 	// OutStream is the output writer for showing the status of the pull
 	// operation.
 	OutStream io.Writer
@@ -66,8 +66,7 @@ func NewPuller(s *TagStore, endpoint registry.APIEndpoint, repoInfo *registry.Re
 func (s *TagStore) Pull(image string, tag string, imagePullConfig *ImagePullConfig) error {
 	var err error
 	doPull := func(image string) error {
-		err := s.pullFromRegistry(image, tag, imagePullConfig)
-		return err
+		return s.pullFromRegistry(image, tag, imagePullConfig)
 	}
 	// Unless the index name is specified, iterate over all registries until
 	// the matching image is found.
@@ -158,7 +157,6 @@ func (s *TagStore) pullFromRegistry(image string, tag string, imagePullConfig *I
 				out.Write(sf.FormatStatus("", "failed"))
 			}
 			return err
-
 		}
 
 		s.eventsService.Log("pull", logName, "")

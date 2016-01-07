@@ -43,7 +43,8 @@ func (p *v1ManifestFetcher) Fetch(ref string) (imgInspect *types.RemoteImageInsp
 		logrus.Debugf("Could not get v1 endpoint: %v", err)
 		return nil, true, err
 	}
-	p.session, err = registry.NewSession(client, p.config.AuthConfig, v1Endpoint)
+	authConfig := registry.ResolveAuthConfigFromMap(p.config.AuthConfigs, p.repoInfo.Index)
+	p.session, err = registry.NewSession(client, &authConfig, v1Endpoint)
 	if err != nil {
 		// TODO(dmcgowan): Check if should fallback
 		logrus.Debugf("Fallback from error: %s", err)

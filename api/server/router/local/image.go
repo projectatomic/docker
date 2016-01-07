@@ -91,16 +91,6 @@ func (s *router) postImagesCreate(ctx context.Context, w http.ResponseWriter, r 
 		tag     = r.Form.Get("tag")
 		message = r.Form.Get("message")
 	)
-	authEncoded := r.Header.Get("X-Registry-Auth")
-	authConfig := &cliconfig.AuthConfig{}
-	if authEncoded != "" {
-		authJSON := base64.NewDecoder(base64.URLEncoding, strings.NewReader(authEncoded))
-		if err := json.NewDecoder(authJSON).Decode(authConfig); err != nil {
-			// for a pull it is not an error if no auth was given
-			// to increase compatibility with the existing api it is defaulting to be empty
-			authConfig = &cliconfig.AuthConfig{}
-		}
-	}
 
 	var (
 		err    error
@@ -121,9 +111,14 @@ func (s *router) postImagesCreate(ctx context.Context, w http.ResponseWriter, r 
 			}
 		}
 
+		authConfigs, err := s.getAuthConfigs(image, r, false, false)
+		if err != nil {
+			return err
+		}
+
 		imagePullConfig := &graph.ImagePullConfig{
 			MetaHeaders: metaHeaders,
-			AuthConfig:  authConfig,
+			AuthConfigs: authConfigs,
 			OutStream:   output,
 		}
 
@@ -171,29 +166,20 @@ func (s *router) postImagesPush(ctx context.Context, w http.ResponseWriter, r *h
 	if err := httputils.ParseForm(r); err != nil {
 		return err
 	}
-	authConfig := &cliconfig.AuthConfig{}
-
-	authEncoded := r.Header.Get("X-Registry-Auth")
-	if authEncoded != "" {
-		// the new format is to handle the authConfig as a header
-		authJSON := base64.NewDecoder(base64.URLEncoding, strings.NewReader(authEncoded))
-		if err := json.NewDecoder(authJSON).Decode(authConfig); err != nil {
-			// to increase compatibility to existing api it is defaulting to be empty
-			authConfig = &cliconfig.AuthConfig{}
-		}
-	} else {
-		// the old format is supported for compatibility if there was no authConfig header
-		if err := json.NewDecoder(r.Body).Decode(authConfig); err != nil {
-			return fmt.Errorf("Bad parameters and missing X-Registry-Auth: %v", err)
-		}
-	}
 
 	name := vars["name"]
+
+	authConfigs, err := s.getAuthConfigs(name, r, true, false)
+	if err != nil {
+		return err
+	}
+
 	output := ioutils.NewWriteFlusher(w)
 	defer output.Close()
+
 	imagePushConfig := &graph.ImagePushConfig{
 		MetaHeaders: metaHeaders,
-		AuthConfig:  authConfig,
+		AuthConfigs: authConfigs,
 		Tag:         r.Form.Get("tag"),
 		OutStream:   output,
 	}
@@ -276,18 +262,10 @@ func (s *router) getImagesByName(ctx context.Context, w http.ResponseWriter, r *
 	name := vars["name"]
 
 	if httputils.BoolValue(r, "remote") {
-		authEncoded := r.Header.Get("X-Registry-Auth")
-		authConfig := &cliconfig.AuthConfig{}
-		if authEncoded != "" {
-			authJSON := base64.NewDecoder(base64.URLEncoding, strings.NewReader(authEncoded))
-			if err := json.NewDecoder(authJSON).Decode(authConfig); err != nil {
-				// for a pull it is not an error if no auth was given
-				// to increase compatibility with the existing api it is defaulting to be empty
-				authConfig = &cliconfig.AuthConfig{}
-			}
+		authConfigs, err := s.getAuthConfigs(name, r, false, false)
+		if err != nil {
+			return err
 		}
-
-		image, tag := parsers.ParseRepositoryTag(name)
 		metaHeaders := map[string][]string{}
 		for k, v := range r.Header {
 			if strings.HasPrefix(k, "X-Meta-") {
@@ -296,8 +274,9 @@ func (s *router) getImagesByName(ctx context.Context, w http.ResponseWriter, r *
 		}
 		lookupRemoteConfig := &graph.LookupRemoteConfig{
 			MetaHeaders: metaHeaders,
-			AuthConfig:  authConfig,
+			AuthConfigs: authConfigs,
 		}
+		image, tag := parsers.ParseRepositoryTag(name)
 		imageInspect, err := s.daemon.LookupRemote(image, tag, lookupRemoteConfig)
 		if err != nil {
 			return err
@@ -314,19 +293,8 @@ func (s *router) getImagesByName(ctx context.Context, w http.ResponseWriter, r *
 }
 
 func (s *router) getImagesTags(ctx context.Context, w http.ResponseWriter, r *http.Request, vars map[string]string) error {
-	name := vars["name"]
-	authEncoded := r.Header.Get("X-Registry-Auth")
-	authConfig := &cliconfig.AuthConfig{}
-	if authEncoded != "" {
-		authJSON := base64.NewDecoder(base64.URLEncoding, strings.NewReader(authEncoded))
-		if err := json.NewDecoder(authJSON).Decode(authConfig); err != nil {
-			// for a pull it is not an error if no auth was given
-			// to increase compatibility with the existing api it is defaulting to be empty
-			authConfig = &cliconfig.AuthConfig{}
-		}
-	}
-
 	var (
+		name    = vars["name"]
 		tagList *types.RepositoryTagList
 		err     error
 	)
@@ -337,6 +305,10 @@ func (s *router) getImagesTags(ctx context.Context, w http.ResponseWriter, r *ht
 		}
 	}
 	if tagList == nil || err != nil {
+		authConfigs, err := s.getAuthConfigs(name, r, false, false)
+		if err != nil {
+			return err
+		}
 		metaHeaders := map[string][]string{}
 		for k, v := range r.Header {
 			if strings.HasPrefix(k, "X-Meta-") {
@@ -345,7 +317,7 @@ func (s *router) getImagesTags(ctx context.Context, w http.ResponseWriter, r *ht
 		}
 		tagsConfig := &graph.RemoteTagsConfig{
 			MetaHeaders: metaHeaders,
-			AuthConfig:  authConfig,
+			AuthConfigs: authConfigs,
 		}
 		tagList, err = s.daemon.RemoteTags(name, tagsConfig)
 		if err != nil {
@@ -584,27 +556,81 @@ func (s *router) getImagesSearch(ctx context.Context, w http.ResponseWriter, r *
 		return err
 	}
 	var (
-		config      *cliconfig.AuthConfig
-		authEncoded = r.Header.Get("X-Registry-Auth")
-		headers     = map[string][]string{}
+		headers = map[string][]string{}
+		term    = r.Form.Get("term")
 	)
 
-	if authEncoded != "" {
-		authJSON := base64.NewDecoder(base64.URLEncoding, strings.NewReader(authEncoded))
-		if err := json.NewDecoder(authJSON).Decode(&config); err != nil {
-			// for a search it is not an error if no auth was given
-			// to increase compatibility with the existing api it is defaulting to be empty
-			config = &cliconfig.AuthConfig{}
-		}
+	authConfigs, err := s.getAuthConfigs(term, r, false, true)
+	if err != nil {
+		return err
 	}
+
 	for k, v := range r.Header {
 		if strings.HasPrefix(k, "X-Meta-") {
 			headers[k] = v
 		}
 	}
-	results, err := s.daemon.SearchRegistryForImages(r.Form.Get("term"), config, headers, httputils.BoolValue(r, "noIndex"))
+	results, err := s.daemon.SearchRegistryForImages(term, authConfigs, headers, httputils.BoolValue(r, "noIndex"))
 	if err != nil {
 		return err
 	}
 	return httputils.WriteJSON(w, http.StatusOK, results)
+}
+
+func (s *router) getAuthConfigs(name string, r *http.Request, backward bool, searchTerm bool) (map[string]cliconfig.AuthConfig, error) {
+	authEncoded := r.Header.Get("X-Registry-Auth")
+	authConfigs := make(map[string]cliconfig.AuthConfig)
+	if authEncoded != "" {
+		authJSON := base64.NewDecoder(base64.URLEncoding, strings.NewReader(authEncoded))
+		if err := json.NewDecoder(authJSON).Decode(&authConfigs); err != nil {
+			// for a pull it is not an error if no auth was given
+			// to increase compatibility with the existing api it is defaulting to be empty
+			authConfigs = make(map[string]cliconfig.AuthConfig)
+		}
+	} else if backward {
+		// the old format is supported for compatibility if there was no authConfig header
+		if err := json.NewDecoder(r.Body).Decode(&authConfigs); err != nil {
+			return nil, fmt.Errorf("Bad parameters and missing X-Registry-Auth: %v", err)
+		}
+	}
+	// maybe client just sends one auth config
+	// try to resolve just one auth config...
+	authConfig := cliconfig.AuthConfig{}
+	if len(authConfigs) == 0 {
+		if authEncoded != "" {
+			authJSONSingle := base64.NewDecoder(base64.URLEncoding, strings.NewReader(authEncoded))
+			if err := json.NewDecoder(authJSONSingle).Decode(&authConfig); err != nil {
+				// for a pull it is not an error if no auth was given
+				// to increase compatibility with the existing api it is defaulting to be empty
+				authConfig = cliconfig.AuthConfig{}
+			}
+		} else if backward {
+			// the old format is supported for compatibility if there was no authConfig header
+			if err := json.NewDecoder(r.Body).Decode(&authConfig); err != nil {
+				return nil, fmt.Errorf("Bad parameters and missing X-Registry-Auth: %v", err)
+			}
+		}
+	}
+
+	if len(authConfigs) == 0 {
+		var (
+			repoInfo *registry.RepositoryInfo
+			err      error
+		)
+		if searchTerm {
+			repoInfo, err = s.daemon.RegistryService.ResolveRepositoryBySearch(name)
+			if err != nil {
+				return nil, err
+			}
+		} else {
+			repoInfo, err = registry.ParseRepositoryInfo(name)
+			if err != nil {
+				return nil, err
+			}
+		}
+		// this is the case when we fully qualify images
+		authConfigs[repoInfo.Index.Name] = authConfig
+	}
+
+	return authConfigs, nil
 }

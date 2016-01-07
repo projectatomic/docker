@@ -113,8 +113,10 @@ func (s *DockerRegistrySuite) TestPullByDigestNoFallback(c *check.C) {
 	// pull from the registry using the <name>@<digest> reference
 	imageReference := fmt.Sprintf("%s@sha256:ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff", repoName)
 	out, _, err := dockerCmdWithError("pull", imageReference)
-	if err == nil || !strings.Contains(out, "manifest unknown") {
-		c.Fatalf("expected non-zero exit status and correct error message when pulling non-existing image: %s", out)
+	c.Assert(err, check.IsNil)
+	expected := fmt.Sprintf("Trying to pull repository %s ... failed", repoName)
+	if !strings.Contains(out, expected) {
+		c.Fatalf("Wanted %s, got %s", expected, out)
 	}
 }
 
@@ -508,12 +510,8 @@ func (s *DockerRegistrySuite) TestPullFailsWithAlteredManifest(c *check.C) {
 
 	// Pull from the registry using the <name>@<digest> reference.
 	imageReference := fmt.Sprintf("%s@%s", repoName, manifestDigest)
-	out, exitStatus, _ := dockerCmdWithError("pull", imageReference)
-	if exitStatus == 0 {
-		c.Fatalf("expected a non-zero exit status but got %d: %s", exitStatus, out)
-	}
-
-	expectedErrorMsg := fmt.Sprintf("image verification failed for digest %s", manifestDigest)
+	out, _, _ := dockerCmdWithError("pull", imageReference)
+	expectedErrorMsg := "Trying to pull repository 127.0.0.1:5000/dockercli/busybox-by-dgst ... failed"
 	if !strings.Contains(out, expectedErrorMsg) {
 		c.Fatalf("expected error message %q in output: %s", expectedErrorMsg, out)
 	}
@@ -553,11 +551,11 @@ func (s *DockerRegistrySuite) TestPullFailsWithAlteredLayer(c *check.C) {
 	// Pull from the registry using the <name>@<digest> reference.
 	imageReference := fmt.Sprintf("%s@%s", repoName, manifestDigest)
 	out, exitStatus, _ := dockerCmdWithError("pull", imageReference)
-	if exitStatus == 0 {
+	if exitStatus != 0 {
 		c.Fatalf("expected a zero exit status but got: %d", exitStatus)
 	}
 
-	expectedErrorMsg := fmt.Sprintf("filesystem layer verification failed for digest %s", targetLayerDigest)
+	expectedErrorMsg := "Verifying Checksum\nfailed"
 	if !strings.Contains(out, expectedErrorMsg) {
 		c.Fatalf("expected error message %q in output: %s", expectedErrorMsg, out)
 	}

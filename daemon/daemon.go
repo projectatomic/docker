@@ -1298,8 +1298,8 @@ func (daemon *Daemon) AuthenticateToRegistry(authConfig *cliconfig.AuthConfig) (
 // SearchRegistryForImages queries the registry for images matching
 // term. authConfig is used to login.
 func (daemon *Daemon) SearchRegistryForImages(term string,
-	authConfig *cliconfig.AuthConfig,
+	authConfigs map[string]cliconfig.AuthConfig,
 	headers map[string][]string,
 	noIndex bool) ([]registry.SearchResultExt, error) {
-	return daemon.RegistryService.Search(term, authConfig, headers, noIndex)
+	return daemon.RegistryService.Search(term, authConfigs, headers, noIndex)
 }

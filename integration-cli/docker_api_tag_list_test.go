@@ -1,6 +1,7 @@
 package main
 
 import (
+	"encoding/base64"
 	"encoding/json"
 	"fmt"
 	"net/http"
@@ -10,6 +11,7 @@ import (
 	"strings"
 
 	"github.com/docker/docker/api/types"
+	"github.com/docker/docker/cliconfig"
 	"github.com/go-check/check"
 )
 
@@ -41,7 +43,7 @@ func assertTagListEqual(c *check.C, d *Daemon, remote, allowEmptyImageID bool, n
 	if remote {
 		suffix = "?remote=1"
 	}
-	endpoint := fmt.Sprintf("/v1.20/images/%s/tags%s", name, suffix)
+	endpoint := fmt.Sprintf("/v1.21/images/%s/tags%s", name, suffix)
 	status, body, err := func() (int, []byte, error) {
 		if d == nil {
 			return sockRequest("GET", endpoint, nil)
@@ -189,7 +191,7 @@ func (s *DockerRegistriesSuite) TestTagApiListRemoteRepository(c *check.C) {
 			{"2.5-hell", helloWorldID},
 		})
 
-	assertTagListEqual(c, s.d, false, true, s.reg1.url+"/foo/busybox", s.reg1.url+"/foo/busybox",
+	assertTagListEqual(c, s.d, true, true, s.reg1.url+"/foo/busybox", s.reg1.url+"/foo/busybox",
 		[]types.RepositoryTag{
 			{"1.2-busy", busyboxID},
 			{"1.3-busy", busyboxID},
@@ -230,5 +232,90 @@ func (s *DockerRegistrySuite) TestTagApiListNotExistentRepository(c *check.C) {
 		if err = json.Unmarshal(body, &tagList); err != nil {
 			c.Assert(tagList, check.Equals, types.RepositoryTagList{})
 		}
+	}
+}
+
+func (s *DockerRegistriesSuite) TestTagApiListRemoteFromAdditionalRegistryWithAuth(c *check.C) {
+	c.Assert(s.d.StartWithBusybox("--add-registry="+s.regWithAuth.url), check.IsNil)
+
+	repo := fmt.Sprintf("%s/busybox", s.regWithAuth.url)
+	repo2 := fmt.Sprintf("%s/runcom/busybox", s.regWithAuth.url)
+	repoUnqualified := "busybox"
+
+	out, err := s.d.Cmd("tag", "busybox", repo)
+	c.Assert(err, check.IsNil, check.Commentf(out))
+	out, err = s.d.Cmd("tag", "busybox", repo2)
+	c.Assert(err, check.IsNil, check.Commentf(out))
+
+	out, err = s.d.Cmd("login", "-u", s.regWithAuth.username, "-p", s.regWithAuth.password, "-e", s.regWithAuth.email, s.regWithAuth.url)
+	c.Assert(err, check.IsNil, check.Commentf(out))
+
+	out, err = s.d.Cmd("push", repo)
+	c.Assert(err, check.IsNil, check.Commentf(out))
+	out, err = s.d.Cmd("push", repo2)
+	c.Assert(err, check.IsNil, check.Commentf(out))
+
+	out, err = s.d.Cmd("rmi", "-f", repo)
+	c.Assert(err, check.IsNil, check.Commentf(out))
+	out, err = s.d.Cmd("rmi", "-f", repo2)
+	c.Assert(err, check.IsNil, check.Commentf(out))
+
+	// verify I cannot search for repo2 without authconfig - I get not found
+	resp, body, err := s.d.sockRequestRaw("GET", fmt.Sprintf("/v1.21/images/%s/tags?remote=1", repo2), nil, "application/json", nil)
+	c.Assert(err, check.IsNil)
+	c.Assert(resp.StatusCode, check.Equals, http.StatusOK)
+	content, err := readBody(body)
+	c.Assert(err, check.IsNil)
+	expected := "null"
+	if !strings.Contains(string(content), expected) {
+		c.Fatalf("Wanted %s, got %s", expected, string(content))
+	}
+
+	ac := cliconfig.AuthConfig{
+		Username: s.regWithAuth.username,
+		Password: s.regWithAuth.password,
+		Email:    s.regWithAuth.email,
+	}
+	b, err := json.Marshal(ac)
+	c.Assert(err, check.IsNil)
+	authConfig := base64.URLEncoding.EncodeToString(b)
+
+	// verify I can search for repo2 with authconfig
+	resp, body, err = s.d.sockRequestRaw("GET", fmt.Sprintf("/v1.21/images/%s/tags?remote=1", repo2), nil, "application/json", map[string]string{"X-Registry-Auth": authConfig})
+	c.Assert(err, check.IsNil)
+	c.Assert(resp.StatusCode, check.Equals, http.StatusOK)
+	content, err = readBody(body)
+	c.Assert(err, check.IsNil)
+	expected = `"TagList":[{"Tag":"latest","ImageID":""}]}`
+	if !strings.Contains(string(content), expected) {
+		c.Fatalf("Wanted %s, got %s", expected, string(content))
+	}
+
+	// verify I can search for repoUnqualified and get result from regwithauth/repoUnqualified
+	resp, body, err = s.d.sockRequestRaw("GET", fmt.Sprintf("/v1.21/images/%s/tags?remote=1", repoUnqualified), nil, "application/json", map[string]string{"X-Registry-Auth": authConfig})
+	c.Assert(err, check.IsNil)
+	c.Assert(resp.StatusCode, check.Equals, http.StatusOK)
+	content, err = readBody(body)
+	c.Assert(err, check.IsNil)
+	expected = fmt.Sprintf(`{"Name":"%s","TagList":[{"Tag":"latest","ImageID":""}]}`, repo)
+	if !strings.Contains(string(content), expected) {
+		c.Fatalf("Wanted %s, got %s", expected, string(content))
+	}
+
+	acs := make(map[string]cliconfig.AuthConfig, 1)
+	acs[s.regWithAuth.url] = ac
+	b, err = json.Marshal(ac)
+	c.Assert(err, check.IsNil)
+	authConfigs := base64.URLEncoding.EncodeToString(b)
+
+	// test api call with "multiple" X-Registry-Auth still works for unqualified image
+	resp, body, err = s.d.sockRequestRaw("GET", fmt.Sprintf("/v1.21/images/%s/tags?remote=1", repoUnqualified), nil, "application/json", map[string]string{"X-Registry-Auth": authConfigs})
+	c.Assert(err, check.IsNil)
+	c.Assert(resp.StatusCode, check.Equals, http.StatusOK)
+	content, err = readBody(body)
+	c.Assert(err, check.IsNil)
+	expected = fmt.Sprintf(`{"Name":"%s","TagList":[{"Tag":"latest","ImageID":""}]}`, repo)
+	if !strings.Contains(string(content), expected) {
+		c.Fatalf("Wanted %s, got %s", expected, string(content))
 	}
 }

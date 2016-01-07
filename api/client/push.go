@@ -27,16 +27,21 @@ func (cli *DockerCli) CmdPush(args ...string) error {
 		return err
 	}
 
-	// Resolve the Auth config relevant for this server
-	authConfig := registry.ResolveAuthConfig(cli.configFile, repoInfo.Index)
-
 	if isTrusted() {
+		// Resolve the Auth config relevant for this server
+		authConfig := registry.ResolveAuthConfig(cli.configFile, repoInfo.Index)
+		// XXX: fix this for multiple authconfigs if additional registries are specified
 		return cli.trustedPush(repoInfo, tag, authConfig)
 	}
 
 	v := url.Values{}
 	v.Set("tag", tag)
 
-	_, _, err = cli.clientRequestAttemptLogin("POST", "/images/"+remote+"/push?"+v.Encode(), nil, cli.out, repoInfo.Index, "push")
+	var index *registry.IndexInfo
+	if registry.RepositoryNameHasIndex(remote) {
+		index = repoInfo.Index
+	}
+
+	_, _, err = cli.clientRequestAttemptLogin("POST", "/images/"+remote+"/push?"+v.Encode(), nil, cli.out, index, "push")
 	return err
 }
