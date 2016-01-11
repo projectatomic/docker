@@ -215,7 +215,7 @@ func (s *Server) LogAction(w http.ResponseWriter, r *http.Request) error {
 			break
 		}
 		message = fmt.Sprintf("LoginUID=%v, %s", loginuid, message)
-		if loginuid == 0xffffffff { // -1 means no login user
+		if loginuid < 0 || uint32(loginuid) >= 0xffffffff { // -1 means no login user
 			//No login UID is set, so no point in looking up a name
 			break
 		}
