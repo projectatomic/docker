@@ -18,7 +18,8 @@ type v2TagLister struct {
 }
 
 func (p *v2TagLister) ListTags() (tagList []*types.RepositoryTag, fallback bool, err error) {
-	p.repo, err = NewV2Repository(p.repoInfo, p.endpoint, p.config.MetaHeaders, p.config.AuthConfig)
+	authConfig := registry.ResolveAuthConfigFromMap(p.config.AuthConfigs, p.repoInfo.Index)
+	p.repo, err = NewV2Repository(p.repoInfo, p.endpoint, p.config.MetaHeaders, &authConfig)
 	if err != nil {
 		logrus.Debugf("Error getting v2 registry: %v", err)
 		return nil, true, err

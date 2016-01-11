@@ -22,7 +22,6 @@ import (
 	"github.com/docker/docker/pkg/progressreader"
 	"github.com/docker/docker/pkg/system"
 	"github.com/docker/docker/pkg/urlutil"
-	"github.com/docker/docker/registry"
 	"github.com/docker/docker/runconfig"
 )
 
@@ -49,24 +48,14 @@ func (d Docker) Pull(name string) (*image.Image, error) {
 		tag = "latest"
 	}
 
-	pullRegistryAuth := &cliconfig.AuthConfig{}
+	pullRegistryAuth := make(map[string]cliconfig.AuthConfig)
 	if len(d.AuthConfigs) > 0 {
-		// The request came with a full auth config file, we prefer to use that
-		repoInfo, err := d.Daemon.RegistryService.ResolveRepository(remote)
-		if err != nil {
-			return nil, err
-		}
-
-		resolvedConfig := registry.ResolveAuthConfig(
-			&cliconfig.ConfigFile{AuthConfigs: d.AuthConfigs},
-			repoInfo.Index,
-		)
-		pullRegistryAuth = &resolvedConfig
+		pullRegistryAuth = d.AuthConfigs
 	}
 
 	imagePullConfig := &graph.ImagePullConfig{
-		AuthConfig: pullRegistryAuth,
-		OutStream:  ioutils.NopWriteCloser(d.OutOld),
+		AuthConfigs: pullRegistryAuth,
+		OutStream:   ioutils.NopWriteCloser(d.OutOld),
 	}
 
 	if err := d.Daemon.PullImage(remote, tag, imagePullConfig); err != nil {

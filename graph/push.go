@@ -17,9 +17,9 @@ type ImagePushConfig struct {
 	// MetaHeaders store HTTP headers with metadata about the image
 	// (DockerHeaders with prefix X-Meta- in the request).
 	MetaHeaders map[string][]string
-	// AuthConfig holds authentication credentials for authenticating with
-	// the registry.
-	AuthConfig *cliconfig.AuthConfig
+	// AuthConfigs holds authentication credentials for authenticating with
+	// all the registries.
+	AuthConfigs map[string]cliconfig.AuthConfig
 	// Tag is the specific variant of the image to be pushed.
 	// If no tag is provided, all tags will be pushed.
 	Tag string
@@ -87,7 +87,8 @@ func (s *TagStore) Push(localName string, imagePushConfig *ImagePushConfig) erro
 	// Custom repositories can have different rules, and we must also
 	// allow pushing by image ID.
 	if repoInfo.Official {
-		username := imagePushConfig.AuthConfig.Username
+		authConfig := imagePushConfig.AuthConfigs[repoInfo.Index.Name]
+		username := authConfig.Username
 		if username == "" {
 			username = "<user>"
 		}

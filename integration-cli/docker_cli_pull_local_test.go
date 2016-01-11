@@ -92,22 +92,29 @@ func (s *DockerRegistrySuite) TestConcurrentPullWholeRepo(c *check.C) {
 func (s *DockerRegistrySuite) TestConcurrentFailingPull(c *check.C) {
 	repoName := fmt.Sprintf("%v/dockercli/busybox", privateRegistryURL)
 
+	type chout struct {
+		err error
+		out string
+	}
 	// Run multiple pulls concurrently
-	results := make(chan error)
+	results := make(chan chout)
 	numPulls := 3
-
 	for i := 0; i != numPulls; i++ {
 		go func() {
-			_, _, err := runCommandWithOutput(exec.Command(dockerBinary, "pull", repoName+":asdfasdf"))
-			results <- err
+			out, _, err := runCommandWithOutput(exec.Command(dockerBinary, "pull", repoName+":asdfasdf"))
+			results <- chout{err: err, out: out}
 		}()
 	}
 
 	// These checks are separate from the loop above because the check
 	// package is not goroutine-safe.
+	expected := "Trying to pull repository 127.0.0.1:5000/dockercli/busybox ... not found"
 	for i := 0; i != numPulls; i++ {
-		err := <-results
-		c.Assert(err, check.NotNil, check.Commentf("expected pull to fail"))
+		choutRes := <-results
+		c.Assert(choutRes.err, check.IsNil, check.Commentf(choutRes.out))
+		if !strings.Contains(choutRes.out, expected) {
+			c.Fatalf("Wanted %s, got %s", expected, choutRes.out)
+		}
 	}
 }
 

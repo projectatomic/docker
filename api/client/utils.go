@@ -129,11 +129,25 @@ func (cli *DockerCli) clientRequest(method, path string, in io.Reader, headers m
 
 // cmdAttempt builds the corresponding registry Auth Header from the given
 // authConfig. It returns the servers body, status, error response
-func (cli *DockerCli) cmdAttempt(authConfig cliconfig.AuthConfig, method, path string, in io.Reader, out io.Writer) (io.ReadCloser, int, error) {
-	buf, err := json.Marshal(authConfig)
-	if err != nil {
-		return nil, -1, err
+func (cli *DockerCli) cmdAttempt(authConfigs map[string]cliconfig.AuthConfig, method, path string, in io.Reader, out io.Writer, index *registry.IndexInfo) (io.ReadCloser, int, error) {
+	var (
+		buf = []byte{}
+		err error
+	)
+	if index != nil {
+		// Resolve the Auth config relevant for this server
+		authConfig := registry.ResolveAuthConfigFromMap(authConfigs, index)
+		buf, err = json.Marshal(authConfig)
+		if err != nil {
+			return nil, -1, err
+		}
+	} else {
+		buf, err = json.Marshal(authConfigs)
+		if err != nil {
+			return nil, -1, err
+		}
 	}
+
 	registryAuthHeader := []string{
 		base64.URLEncoding.EncodeToString(buf),
 	}
@@ -161,17 +175,13 @@ func (cli *DockerCli) cmdAttempt(authConfig cliconfig.AuthConfig, method, path s
 }
 
 func (cli *DockerCli) clientRequestAttemptLogin(method, path string, in io.Reader, out io.Writer, index *registry.IndexInfo, cmdName string) (io.ReadCloser, int, error) {
-
-	// Resolve the Auth config relevant for this server
-	authConfig := registry.ResolveAuthConfig(cli.configFile, index)
-	body, statusCode, err := cli.cmdAttempt(authConfig, method, path, in, out)
+	body, statusCode, err := cli.cmdAttempt(cli.configFile.AuthConfigs, method, path, in, out, index)
 	if statusCode == http.StatusUnauthorized {
 		fmt.Fprintf(cli.out, "\nPlease login prior to %s:\n", cmdName)
 		if err = cli.CmdLogin(index.GetAuthConfigKey()); err != nil {
 			return nil, -1, err
 		}
-		authConfig = registry.ResolveAuthConfig(cli.configFile, index)
-		return cli.cmdAttempt(authConfig, method, path, in, out)
+		return cli.cmdAttempt(cli.configFile.AuthConfigs, method, path, in, out, index)
 	}
 	return body, statusCode, err
 }

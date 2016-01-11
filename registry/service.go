@@ -129,18 +129,19 @@ func getSearchResultsCmpFunc(withIndex bool) by {
 	return less
 }
 
-func (s *Service) searchTerm(term string, authConfig *cliconfig.AuthConfig, headers map[string][]string, noIndex bool, outs *[]SearchResultExt) error {
+func (s *Service) searchTerm(term string, authConfigs map[string]cliconfig.AuthConfig, headers map[string][]string, noIndex bool, outs *[]SearchResultExt) error {
 	repoInfo, err := s.ResolveRepositoryBySearch(term)
 	if err != nil {
 		return err
 	}
+	authConfig := ResolveAuthConfigFromMap(authConfigs, repoInfo.Index)
 
 	// *TODO: Search multiple indexes.
 	endpoint, err := NewEndpoint(repoInfo.Index, http.Header(headers), APIVersionUnknown)
 	if err != nil {
 		return err
 	}
-	r, err := NewSession(endpoint.client, authConfig, endpoint)
+	r, err := NewSession(endpoint.client, &authConfig, endpoint)
 	if err != nil {
 		return err
 	}
@@ -217,18 +218,18 @@ func removeSearchDuplicates(data []SearchResultExt) []SearchResultExt {
 
 // Search queries several registries for images matching the specified
 // search terms, and returns the results.
-func (s *Service) Search(term string, authConfig *cliconfig.AuthConfig, headers map[string][]string, noIndex bool) ([]SearchResultExt, error) {
+func (s *Service) Search(term string, authConfigs map[string]cliconfig.AuthConfig, headers map[string][]string, noIndex bool) ([]SearchResultExt, error) {
 	results := []SearchResultExt{}
 	cmpFunc := getSearchResultsCmpFunc(!noIndex)
 
 	// helper for concurrent queries
 	searchRoutine := func(term string, c chan<- error) {
-		err := s.searchTerm(term, authConfig, headers, noIndex, &results)
+		err := s.searchTerm(term, authConfigs, headers, noIndex, &results)
 		c <- err
 	}
 
 	if RepositoryNameHasIndex(term) {
-		if err := s.searchTerm(term, authConfig, headers, noIndex, &results); err != nil {
+		if err := s.searchTerm(term, authConfigs, headers, noIndex, &results); err != nil {
 			return nil, err
 		}
 	} else if len(RegistryList) < 1 {

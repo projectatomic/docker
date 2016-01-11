@@ -46,7 +46,8 @@ func (p *v1Pusher) Push() (fallback bool, err error) {
 		logrus.Debugf("Could not get v1 endpoint: %v", err)
 		return true, err
 	}
-	p.session, err = registry.NewSession(client, p.config.AuthConfig, v1Endpoint)
+	authConfig := registry.ResolveAuthConfigFromMap(p.config.AuthConfigs, p.repoInfo.Index)
+	p.session, err = registry.NewSession(client, &authConfig, v1Endpoint)
 	if err != nil {
 		// TODO(dmcgowan): Check if should fallback
 		return true, err

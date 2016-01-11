@@ -41,7 +41,8 @@ type v2Pusher struct {
 }
 
 func (p *v2Pusher) Push() (fallback bool, err error) {
-	p.repo, err = NewV2Repository(p.repoInfo, p.endpoint, p.config.MetaHeaders, p.config.AuthConfig, "push", "pull")
+	authConfig := registry.ResolveAuthConfigFromMap(p.config.AuthConfigs, p.repoInfo.Index)
+	p.repo, err = NewV2Repository(p.repoInfo, p.endpoint, p.config.MetaHeaders, &authConfig, "push", "pull")
 	if err != nil {
 		logrus.Debugf("Error getting v2 registry: %v", err)
 		return true, err

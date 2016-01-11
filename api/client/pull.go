@@ -42,12 +42,18 @@ func (cli *DockerCli) CmdPull(args ...string) error {
 	if isTrusted() && !ref.HasDigest() {
 		// Check if tag is digest
 		authConfig := registry.ResolveAuthConfig(cli.configFile, repoInfo.Index)
+		// XXX: fix this for multiple authconfigs if additional registries are specified
 		return cli.trustedPull(repoInfo, ref, authConfig)
 	}
 
 	v := url.Values{}
 	v.Set("fromImage", ref.ImageName(taglessRemote))
 
-	_, _, err = cli.clientRequestAttemptLogin("POST", "/images/create?"+v.Encode(), nil, cli.out, repoInfo.Index, "pull")
+	var index *registry.IndexInfo
+	if registry.RepositoryNameHasIndex(remote) {
+		index = repoInfo.Index
+	}
+
+	_, _, err = cli.clientRequestAttemptLogin("POST", "/images/create?"+v.Encode(), nil, cli.out, index, "pull")
 	return err
 }

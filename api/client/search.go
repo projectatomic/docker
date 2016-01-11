@@ -37,15 +37,21 @@ func (cli *DockerCli) CmdSearch(args ...string) error {
 		v.Set("noIndex", "1")
 	}
 
-	// Resolve the Repository name from fqn to hostname + name
-	taglessRemote, _ := parsers.ParseRepositoryTag(name)
+	var (
+		index *registry.IndexInfo
+		err   error
+	)
 
-	indexInfo, err := registry.ParseIndexInfo(taglessRemote)
-	if err != nil {
-		return err
+	if registry.RepositoryNameHasIndex(name) {
+		// Resolve the Repository name from fqn to hostname + name
+		taglessRemote, _ := parsers.ParseRepositoryTag(name)
+		index, err = registry.ParseIndexInfo(taglessRemote)
+		if err != nil {
+			return err
+		}
 	}
 
-	rdr, _, err := cli.clientRequestAttemptLogin("GET", "/images/search?"+v.Encode(), nil, nil, indexInfo, "search")
+	rdr, _, err := cli.clientRequestAttemptLogin("GET", "/images/search?"+v.Encode(), nil, nil, index, "search")
 	if err != nil {
 		return err
 	}

@@ -51,7 +51,7 @@ func (r byAPIVersion) Less(i, j int) bool {
 // RemoteTagsConfig allows to specify transport paramater for remote ta listing.
 type RemoteTagsConfig struct {
 	MetaHeaders map[string][]string
-	AuthConfig  *cliconfig.AuthConfig
+	AuthConfigs map[string]cliconfig.AuthConfig
 }
 
 // TagLister allows to list tags of remote repository.

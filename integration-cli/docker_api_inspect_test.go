@@ -2,6 +2,7 @@ package main
 
 import (
 	"bytes"
+	"encoding/base64"
 	"encoding/json"
 	"fmt"
 	"net/http"
@@ -10,6 +11,7 @@ import (
 
 	"github.com/docker/docker/api/types"
 	"github.com/docker/docker/api/types/versions/v1p20"
+	"github.com/docker/docker/cliconfig"
 	"github.com/docker/docker/pkg/integration/checker"
 	"github.com/docker/docker/pkg/stringutils"
 	"github.com/go-check/check"
@@ -397,4 +399,90 @@ func (s *DockerRegistrySuite) TestInspectApiNonExistentRepository(c *check.C) {
 	_, status, err = apiCallInspectImage(c, nil, repoName, true, true)
 	c.Assert(err, check.Not(check.IsNil))
 	c.Assert(err.Error(), check.Matches, `(?i).*(not found|no such image|no tags available|not known).*`)
+}
+
+func (s *DockerRegistriesSuite) TestInspectApiRemoteImageFromAdditionalRegistryWithAuth(c *check.C) {
+	c.Assert(s.d.StartWithBusybox("--add-registry="+s.regWithAuth.url), check.IsNil)
+
+	repo := fmt.Sprintf("%s/busybox", s.regWithAuth.url)
+	repo2 := fmt.Sprintf("%s/runcom/busybox", s.regWithAuth.url)
+	repoUnqualified := "busybox"
+	repo2Unqualified := "runcom/busybox"
+
+	out, err := s.d.Cmd("tag", "busybox", repo)
+	c.Assert(err, check.IsNil, check.Commentf(out))
+	out, err = s.d.Cmd("tag", "busybox", repo2)
+	c.Assert(err, check.IsNil, check.Commentf(out))
+
+	out, err = s.d.Cmd("login", "-u", s.regWithAuth.username, "-p", s.regWithAuth.password, "-e", s.regWithAuth.email, s.regWithAuth.url)
+	c.Assert(err, check.IsNil, check.Commentf(out))
+
+	out, err = s.d.Cmd("push", repo)
+	c.Assert(err, check.IsNil, check.Commentf(out))
+	out, err = s.d.Cmd("push", repo2)
+	c.Assert(err, check.IsNil, check.Commentf(out))
+
+	out, err = s.d.Cmd("rmi", "-f", repo)
+	c.Assert(err, check.IsNil, check.Commentf(out))
+	out, err = s.d.Cmd("rmi", "-f", repo2)
+	c.Assert(err, check.IsNil, check.Commentf(out))
+
+	// verify I cannot search for repo2 without authconfig - I get not found
+	resp, body, err := s.d.sockRequestRaw("GET", fmt.Sprintf("/v1.21/images/%s/json?remote=1", repo2), nil, "application/json", nil)
+	c.Assert(err, check.IsNil)
+	c.Assert(resp.StatusCode, check.Equals, http.StatusNotFound)
+	content, err := readBody(body)
+	c.Assert(err, check.IsNil)
+	expected := fmt.Sprintf("image %s not found", repo2Unqualified)
+	if !strings.Contains(string(content), expected) {
+		c.Fatalf("Wanted %s, got %s", expected, string(content))
+	}
+
+	ac := cliconfig.AuthConfig{
+		Username: s.regWithAuth.username,
+		Password: s.regWithAuth.password,
+		Email:    s.regWithAuth.email,
+	}
+	b, err := json.Marshal(ac)
+	c.Assert(err, check.IsNil)
+	authConfig := base64.URLEncoding.EncodeToString(b)
+
+	// verify I can search for repo2 with authconfig
+	resp, body, err = s.d.sockRequestRaw("GET", fmt.Sprintf("/v1.21/images/%s/json?remote=1", repo2), nil, "application/json", map[string]string{"X-Registry-Auth": authConfig})
+	c.Assert(err, check.IsNil)
+	c.Assert(resp.StatusCode, check.Equals, http.StatusOK)
+	content, err = readBody(body)
+	c.Assert(err, check.IsNil)
+	expected = fmt.Sprintf(`"Registry":"%s"`, s.regWithAuth.url)
+	if !strings.Contains(string(content), expected) {
+		c.Fatalf("Wanted %s, got %s", expected, string(content))
+	}
+
+	// verify I can search for repoUnqualified and get result from regwithauth/repoUnqualified
+	resp, body, err = s.d.sockRequestRaw("GET", fmt.Sprintf("/v1.21/images/%s/json?remote=1", repoUnqualified), nil, "application/json", map[string]string{"X-Registry-Auth": authConfig})
+	c.Assert(err, check.IsNil)
+	c.Assert(resp.StatusCode, check.Equals, http.StatusOK)
+	content, err = readBody(body)
+	c.Assert(err, check.IsNil)
+	expected = fmt.Sprintf(`"Registry":"%s"`, s.regWithAuth.url)
+	if !strings.Contains(string(content), expected) {
+		c.Fatalf("Wanted %s, got %s", expected, string(content))
+	}
+
+	acs := make(map[string]cliconfig.AuthConfig, 1)
+	acs[s.regWithAuth.url] = ac
+	b, err = json.Marshal(ac)
+	c.Assert(err, check.IsNil)
+	authConfigs := base64.URLEncoding.EncodeToString(b)
+
+	// test api call with "multiple" X-Registry-Auth still works for unqualified image
+	resp, body, err = s.d.sockRequestRaw("GET", fmt.Sprintf("/v1.21/images/%s/json?remote=1", repoUnqualified), nil, "application/json", map[string]string{"X-Registry-Auth": authConfigs})
+	c.Assert(err, check.IsNil)
+	c.Assert(resp.StatusCode, check.Equals, http.StatusOK)
+	content, err = readBody(body)
+	c.Assert(err, check.IsNil)
+	expected = fmt.Sprintf(`"Registry":"%s"`, s.regWithAuth.url)
+	if !strings.Contains(string(content), expected) {
+		c.Fatalf("Wanted %s, got %s", expected, string(content))
+	}
 }

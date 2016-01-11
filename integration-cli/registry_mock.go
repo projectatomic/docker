@@ -46,7 +46,7 @@ func newTestRegistry(c *check.C) (*testRegistry, error) {
 		}
 
 		if !matched {
-			c.Fatal("Unable to match", url, "with regexp")
+			c.Fatalf("Unable to match %s with regexp", url)
 		}
 	}))
 
