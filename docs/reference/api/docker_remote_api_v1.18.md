@@ -1315,6 +1315,7 @@ Return low-level information on the image `name`
 Status Codes:
 
 -   **200** – no error
+-   **403** - refused to push to public registry
 -   **404** – no such image
 -   **500** – server error
 
@@ -1383,6 +1384,7 @@ Push the image `name` on the registry
 
 Query Parameters:
 
+-   **force** - force push to public Docker registry
 -   **tag** – the tag to associate with the image on the registry, optional
 
 Request Headers:

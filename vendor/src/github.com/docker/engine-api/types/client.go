@@ -191,7 +191,10 @@ type ImagePullOptions struct {
 }
 
 //ImagePushOptions holds information to push images.
-type ImagePushOptions ImagePullOptions
+type ImagePushOptions struct {
+	ImagePullOptions
+	Force bool
+}
 
 // ImageRemoveOptions holds parameters to remove images.
 type ImageRemoveOptions struct {
