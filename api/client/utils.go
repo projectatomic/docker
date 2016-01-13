@@ -1,9 +1,11 @@
 package client
 
 import (
+	"bufio"
 	"encoding/base64"
 	"encoding/json"
 	"fmt"
+	"io"
 	"os"
 	gosignal "os/signal"
 	"runtime"
@@ -161,4 +163,14 @@ func (cli *DockerCli) getTtySize() (int, int) {
 		}
 	}
 	return int(ws.Height), int(ws.Width)
+}
+
+func readInput(in io.Reader, out io.Writer) string {
+	reader := bufio.NewReader(in)
+	line, _, err := reader.ReadLine()
+	if err != nil {
+		fmt.Fprintln(out, err.Error())
+		os.Exit(1)
+	}
+	return string(line)
 }

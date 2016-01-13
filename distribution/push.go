@@ -50,6 +50,10 @@ type ImagePushConfig struct {
 	TrustKey libtrust.PrivateKey
 	// UploadManager dispatches uploads.
 	UploadManager *xfer.LayerUploadManager
+	// Whether to ask user to confirm a push to public Docker registry.
+	ConfirmDefPush bool
+	// Whether to allow for push to public registry without confirmation.
+	Force bool
 }
 
 // Pusher is an interface that abstracts pushing for different API versions.
@@ -114,6 +118,12 @@ func Push(ctx context.Context, ref reference.Named, imagePushConfig *ImagePushCo
 		}
 		name := strings.TrimPrefix(repoInfo.RemoteName(), reference.DefaultRepoPrefix)
 		return fmt.Errorf("You cannot push a \"root\" repository. Please rename your repository to %s/<user>/<repo> (ex: %s/%s/%s)", registry.IndexName, registry.IndexName, username, name)
+	}
+
+	if repoInfo.Index.Official && imagePushConfig.ConfirmDefPush && !imagePushConfig.Force {
+		return fmt.Errorf("Error: Status 403 trying to push repository %s to official registry: needs to be forced", repoInfo.RemoteName())
+	} else if repoInfo.Index.Official && !imagePushConfig.ConfirmDefPush && imagePushConfig.Force {
+		logrus.Infof("Push of %s to official registry has been forced", repoInfo.RemoteName())
 	}
 
 	endpoints, err := imagePushConfig.RegistryService.LookupPushEndpoints(repoInfo)

@@ -364,12 +364,11 @@ func (cli *DockerCli) trustedPull(distributionRef reference.Named, repoInfo *reg
 	return nil
 }
 
-func (cli *DockerCli) trustedPush(ref reference.Named, repoInfo *registry.RepositoryInfo, tag string, requestPrivilege apiclient.RequestPrivilegeFunc) error {
-	responseBody, err := cli.imagePushPrivileged(ref, tag, requestPrivilege)
-	if err != nil {
+func (cli *DockerCli) trustedPush(ref reference.Named, repoInfo *registry.RepositoryInfo, tag string, force bool, requestPrivilege apiclient.RequestPrivilegeFunc) error {
+	responseBody, err := cli.imagePushPrivileged(ref, tag, force, requestPrivilege)
+	if err != nil || responseBody == nil {
 		return err
 	}
-
 	defer responseBody.Close()
 
 	targets := []target{}
