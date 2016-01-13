@@ -1146,28 +1146,44 @@ func (daemon *Daemon) LookupImage(name string) (*types.ImageInspect, error) {
 	}
 
 	imageInspect := &types.ImageInspect{
-		ID:              img.ID().String(),
-		RepoTags:        repoTags,
-		RepoDigests:     repoDigests,
-		Parent:          img.Parent.String(),
-		Comment:         comment,
-		Created:         img.Created.Format(time.RFC3339Nano),
-		Container:       img.Container,
-		ContainerConfig: &img.ContainerConfig,
-		DockerVersion:   img.DockerVersion,
-		Author:          img.Author,
-		Config:          img.Config,
-		Architecture:    img.Architecture,
-		Os:              img.OS,
-		Size:            size,
-		VirtualSize:     size, // TODO: field unused, deprecate
+		ID: img.ID().String(),
+		ImageInspectBase: types.ImageInspectBase{
+			RepoTags:        repoTags,
+			RepoDigests:     repoDigests,
+			Parent:          img.Parent.String(),
+			Comment:         comment,
+			Created:         img.Created.Format(time.RFC3339Nano),
+			Container:       img.Container,
+			ContainerConfig: &img.ContainerConfig,
+			DockerVersion:   img.DockerVersion,
+			Author:          img.Author,
+			Config:          img.Config,
+			Architecture:    img.Architecture,
+			Os:              img.OS,
+			Size:            size,
+		},
+		VirtualSize: size, // TODO: field unused, deprecate
+		GraphDriver: types.GraphDriverData{
+			Name: daemon.GraphDriverName(),
+			Data: layerMetadata,
+		},
 	}
 
-	imageInspect.GraphDriver.Name = daemon.GraphDriverName()
-
-	imageInspect.GraphDriver.Data = layerMetadata
-
 	return imageInspect, nil
+}
+
+// LookupRemote looks up an image in remote repository.
+func (daemon *Daemon) LookupRemote(ref reference.Named, metaHeaders map[string][]string, authConfig *types.AuthConfig) (*types.RemoteImageInspect, error) {
+	inspectConfig := &distribution.InspectConfig{
+		MetaHeaders:     metaHeaders,
+		AuthConfig:      authConfig,
+		RegistryService: daemon.RegistryService,
+		MetadataStore:   daemon.distributionMetadataStore,
+	}
+
+	ctx := context.Background()
+
+	return distribution.Inspect(ctx, ref, inspectConfig)
 }
 
 // LoadImage uploads a set of images into the repository. This is the

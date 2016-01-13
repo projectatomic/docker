@@ -66,8 +66,10 @@ func CreateID(v1Image image.V1Image, layerID layer.ChainID, parent digest.Digest
 	return digest.FromBytes(configJSON), nil
 }
 
-// MakeConfigFromV1Config creates an image config from the legacy V1 config format.
-func MakeConfigFromV1Config(imageJSON []byte, rootfs *image.RootFS, history []image.History) ([]byte, error) {
+// MakeRawConfigFromV1Config creates an image config from the legacy V1 config
+// format and returns it as a map of json raw messages. No attributes will be
+// removed from the config.
+func MakeRawConfigFromV1Config(imageJSON []byte, rootfs *image.RootFS, history []image.History) (map[string]*json.RawMessage, error) {
 	var dver struct {
 		DockerVersion string `json:"docker_version"`
 	}
@@ -95,15 +97,25 @@ func MakeConfigFromV1Config(imageJSON []byte, rootfs *image.RootFS, history []im
 		return nil, err
 	}
 
+	c["rootfs"] = rawJSON(rootfs)
+	c["history"] = rawJSON(history)
+
+	return c, nil
+}
+
+// MakeConfigFromV1Config creates an image config from the legacy V1 config format.
+func MakeConfigFromV1Config(imageJSON []byte, rootfs *image.RootFS, history []image.History) ([]byte, error) {
+	c, err := MakeRawConfigFromV1Config(imageJSON, rootfs, history)
+	if err != nil {
+		return nil, err
+	}
+
 	delete(c, "id")
 	delete(c, "parent")
 	delete(c, "Size") // Size is calculated from data on disk and is inconsitent
 	delete(c, "parent_id")
 	delete(c, "layer_id")
 	delete(c, "throwaway")
-
-	c["rootfs"] = rawJSON(rootfs)
-	c["history"] = rawJSON(history)
 
 	return json.Marshal(c)
 }

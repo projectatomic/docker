@@ -292,7 +292,42 @@ func (s *router) deleteImages(ctx context.Context, w http.ResponseWriter, r *htt
 }
 
 func (s *router) getImagesByName(ctx context.Context, w http.ResponseWriter, r *http.Request, vars map[string]string) error {
-	imageInspect, err := s.daemon.LookupImage(vars["name"])
+	if vars == nil {
+		return fmt.Errorf("Missing parameter")
+	}
+
+	name := vars["name"]
+
+	if httputils.BoolValue(r, "remote") {
+		authEncoded := r.Header.Get("X-Registry-Auth")
+		authConfig := &types.AuthConfig{}
+		if authEncoded != "" {
+			authJSON := base64.NewDecoder(base64.URLEncoding, strings.NewReader(authEncoded))
+			if err := json.NewDecoder(authJSON).Decode(authConfig); err != nil {
+				// for a pull it is not an error if no auth was given
+				// to increase compatibility with the existing api it is defaulting to be empty
+				authConfig = &types.AuthConfig{}
+			}
+		}
+
+		ref, err := reference.ParseNamed(name)
+		if err != nil {
+			return err
+		}
+		metaHeaders := map[string][]string{}
+		for k, v := range r.Header {
+			if strings.HasPrefix(k, "X-Meta-") {
+				metaHeaders[k] = v
+			}
+		}
+		imageInspect, err := s.daemon.LookupRemote(ref, metaHeaders, authConfig)
+		if err != nil {
+			return err
+		}
+		return httputils.WriteJSON(w, http.StatusOK, imageInspect)
+	}
+
+	imageInspect, err := s.daemon.LookupImage(name)
 	if err != nil {
 		return err
 	}
