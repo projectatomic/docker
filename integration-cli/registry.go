@@ -64,10 +64,6 @@ http:
 	}, nil
 }
 
-func newTestRegistryV2(c *check.C) (*testRegistryV2, error) {
-	return newTestRegistryV2At(c, privateRegistryURL)
-}
-
 func (t *testRegistryV2) Ping() error {
 	// We always ping through HTTP for our test registry.
 	resp, err := http.Get(fmt.Sprintf("http://%s/v2/", t.url))
