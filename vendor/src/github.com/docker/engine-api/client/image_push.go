@@ -15,6 +15,9 @@ import (
 func (cli *Client) ImagePush(options types.ImagePushOptions, privilegeFunc RequestPrivilegeFunc) (io.ReadCloser, error) {
 	query := url.Values{}
 	query.Set("tag", options.Tag)
+	if options.Force {
+		query.Set("force", "1")
+	}
 
 	resp, err := cli.tryImagePush(options.ImageID, query, options.RegistryAuth)
 	if resp.statusCode == http.StatusUnauthorized {

@@ -363,8 +363,8 @@ func (cli *DockerCli) trustedPull(repoInfo *registry.RepositoryInfo, ref registr
 	return nil
 }
 
-func (cli *DockerCli) trustedPush(repoInfo *registry.RepositoryInfo, tag string, authConfig types.AuthConfig, requestPrivilege apiclient.RequestPrivilegeFunc) error {
-	responseBody, err := cli.imagePushPrivileged(authConfig, repoInfo.Name(), tag, requestPrivilege)
+func (cli *DockerCli) trustedPush(repoInfo *registry.RepositoryInfo, tag string, force bool, authConfig types.AuthConfig, requestPrivilege apiclient.RequestPrivilegeFunc) error {
+	responseBody, err := cli.imagePushPrivileged(authConfig, repoInfo.Name(), tag, force, requestPrivilege)
 	if err != nil {
 		return err
 	}

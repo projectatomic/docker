@@ -64,6 +64,7 @@ type CommonConfig struct {
 	TrustKeyPath         string              `json:"-"`
 	BlockedRegistries    []string
 	AdditionalRegistries []string
+	ConfirmDefPush       bool
 
 	// ClusterStore is the storage backend used for the cluster information. It is used by both
 	// multihost networking (to store networks and endpoints information) and by the node discovery
@@ -115,6 +116,7 @@ func (config *Config) InstallCommonFlags(cmd *flag.FlagSet, usageFn func(string)
 	cmd.Var(opts.NewNamedMapOpts("cluster-store-opts", config.ClusterOpts, nil), []string{"-cluster-store-opt"}, usageFn("Set cluster store options"))
 	cmd.Var(opts.NewListOptsRef(&config.BlockedRegistries, registry.ValidateIndexName), []string{"-block-registry"}, usageFn("Don't contact given registry"))
 	cmd.Var(opts.NewListOptsRef(&config.AdditionalRegistries, registry.ValidateIndexName), []string{"-add-registry"}, usageFn("Registry to query before a public one"))
+	cmd.BoolVar(&config.ConfirmDefPush, []string{"-confirm-def-push"}, true, usageFn("Confirm a push to default registry"))
 }
 
 func parseClusterAdvertiseSettings(clusterStore, clusterAdvertise string) (string, error) {

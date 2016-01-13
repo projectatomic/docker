@@ -164,6 +164,7 @@ type Daemon struct {
 	imageStore                image.Store
 	nameIndex                 *registrar.Registrar
 	linkIndex                 *linkIndex
+	confirmDefPush            bool
 }
 
 // GetContainer looks for a container using the provided information, which could be
@@ -817,6 +818,7 @@ func NewDaemon(config *Config, registryService *registry.Service) (daemon *Daemo
 
 	d.nameIndex = registrar.NewRegistrar()
 	d.linkIndex = newLinkIndex()
+	d.confirmDefPush = config.ConfirmDefPush
 
 	if err := d.cleanupMounts(); err != nil {
 		return nil, err
@@ -1062,7 +1064,7 @@ func (daemon *Daemon) ExportImage(names []string, outStream io.Writer) error {
 }
 
 // PushImage initiates a push operation on the repository named localName.
-func (daemon *Daemon) PushImage(ref reference.Named, metaHeaders map[string][]string, authConfig *types.AuthConfig, outStream io.Writer) error {
+func (daemon *Daemon) PushImage(ref reference.Named, metaHeaders map[string][]string, authConfig *types.AuthConfig, force bool, outStream io.Writer) error {
 	// Include a buffer so that slow client connections don't affect
 	// transfer performance.
 	progressChan := make(chan progress.Progress, 100)
@@ -1088,6 +1090,8 @@ func (daemon *Daemon) PushImage(ref reference.Named, metaHeaders map[string][]st
 		ReferenceStore:   daemon.referenceStore,
 		TrustKey:         daemon.trustKey,
 		UploadManager:    daemon.uploadManager,
+		ConfirmDefPush:   daemon.confirmDefPush,
+		Force:            force,
 	}
 
 	err := distribution.Push(ctx, ref, imagePushConfig)
