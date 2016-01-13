@@ -64,6 +64,39 @@ func (s *DockerRegistrySuite) TearDownTest(c *check.C) {
 }
 
 func init() {
+	check.Suite(&DockerSchema1RegistriesSuite{
+		ds: &DockerSuite{},
+	})
+}
+
+type DockerSchema1RegistriesSuite struct {
+	ds   *DockerSuite
+	reg1 *testRegistryV2
+	reg2 *testRegistryV2
+	d    *Daemon
+}
+
+func (s *DockerSchema1RegistriesSuite) SetUpTest(c *check.C) {
+	testRequires(c, DaemonIsLinux)
+	s.reg1 = setupRegistryAt(c, privateRegistryURL, true)
+	s.reg2 = setupRegistryAt(c, privateRegistryURL2, true)
+	s.d = NewDaemon(c)
+}
+
+func (s *DockerSchema1RegistriesSuite) TearDownTest(c *check.C) {
+	if s.reg2 != nil {
+		s.reg2.Close()
+	}
+	if s.reg1 != nil {
+		s.reg1.Close()
+	}
+	if s.d != nil {
+		s.d.Stop()
+	}
+	s.ds.TearDownTest(c)
+}
+
+func init() {
 	check.Suite(&DockerSchema1RegistrySuite{
 		ds: &DockerSuite{},
 	})
@@ -150,8 +183,8 @@ type DockerRegistriesSuite struct {
 }
 
 func (s *DockerRegistriesSuite) SetUpTest(c *check.C) {
-	s.reg1 = setupRegistryAt(c, privateRegistryURL)
-	s.reg2 = setupRegistryAt(c, privateRegistryURL2)
+	s.reg1 = setupRegistryAt(c, privateRegistryURL, false)
+	s.reg2 = setupRegistryAt(c, privateRegistryURL2, false)
 	s.d = NewDaemon(c)
 }
 

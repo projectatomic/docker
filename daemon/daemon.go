@@ -15,6 +15,7 @@ import (
 	"path"
 	"path/filepath"
 	"runtime"
+	"sort"
 	"sync"
 	"syscall"
 	"time"
@@ -133,6 +134,12 @@ func (c *contStore) List() []*container.Container {
 	containers.sort()
 	return *containers
 }
+
+type byTagName []*types.RepositoryTag
+
+func (r byTagName) Len() int           { return len(r) }
+func (r byTagName) Swap(i, j int)      { r[i], r[j] = r[j], r[i] }
+func (r byTagName) Less(i, j int) bool { return r[i].Tag < r[j].Tag }
 
 // Daemon holds information about the Docker daemon.
 type Daemon struct {
@@ -1146,28 +1153,44 @@ func (daemon *Daemon) LookupImage(name string) (*types.ImageInspect, error) {
 	}
 
 	imageInspect := &types.ImageInspect{
-		ID:              img.ID().String(),
-		RepoTags:        repoTags,
-		RepoDigests:     repoDigests,
-		Parent:          img.Parent.String(),
-		Comment:         comment,
-		Created:         img.Created.Format(time.RFC3339Nano),
-		Container:       img.Container,
-		ContainerConfig: &img.ContainerConfig,
-		DockerVersion:   img.DockerVersion,
-		Author:          img.Author,
-		Config:          img.Config,
-		Architecture:    img.Architecture,
-		Os:              img.OS,
-		Size:            size,
-		VirtualSize:     size, // TODO: field unused, deprecate
+		ImageInspectBase: types.ImageInspectBase{
+			ID:              img.ID().String(),
+			RepoTags:        repoTags,
+			RepoDigests:     repoDigests,
+			Parent:          img.Parent.String(),
+			Comment:         comment,
+			Created:         img.Created.Format(time.RFC3339Nano),
+			Container:       img.Container,
+			ContainerConfig: &img.ContainerConfig,
+			DockerVersion:   img.DockerVersion,
+			Author:          img.Author,
+			Config:          img.Config,
+			Architecture:    img.Architecture,
+			Os:              img.OS,
+			Size:            size,
+		},
+		VirtualSize: size, // TODO: field unused, deprecate
+		GraphDriver: types.GraphDriverData{
+			Name: daemon.GraphDriverName(),
+			Data: layerMetadata,
+		},
 	}
 
-	imageInspect.GraphDriver.Name = daemon.GraphDriverName()
-
-	imageInspect.GraphDriver.Data = layerMetadata
-
 	return imageInspect, nil
+}
+
+// LookupRemote looks up an image in remote repository.
+func (daemon *Daemon) LookupRemote(ref reference.Named, metaHeaders map[string][]string, authConfig *types.AuthConfig) (*types.RemoteImageInspect, error) {
+	inspectConfig := &distribution.InspectConfig{
+		MetaHeaders:     metaHeaders,
+		AuthConfig:      authConfig,
+		RegistryService: daemon.RegistryService,
+		MetadataStore:   daemon.distributionMetadataStore,
+	}
+
+	ctx := context.Background()
+
+	return distribution.Inspect(ctx, ref, inspectConfig)
 }
 
 // LoadImage uploads a set of images into the repository. This is the
@@ -1295,6 +1318,46 @@ func (daemon *Daemon) GetImage(refOrID string) (*image.Image, error) {
 // GraphDriverName returns the name of the graph driver used by the layer.Store
 func (daemon *Daemon) GraphDriverName() string {
 	return daemon.layerStore.DriverName()
+}
+
+// ListLocalTags returns a tag list for given local repository.
+func (daemon *Daemon) ListLocalTags(reposName reference.Named) (*types.RepositoryTagList, error) {
+	var tagList *types.RepositoryTagList
+
+	associations := daemon.referenceStore.ReferencesByName(reposName)
+	if len(associations) == 0 {
+		return nil, ErrImageDoesNotExist{reposName.String()}
+	}
+
+	tagList = &types.RepositoryTagList{
+		Name:    associations[0].Ref.Name(),
+		TagList: make([]*types.RepositoryTag, 0, len(associations)),
+	}
+
+	for _, assoc := range associations {
+		if tagged, isTagged := assoc.Ref.(reference.NamedTagged); isTagged {
+			tagList.TagList = append(tagList.TagList, &types.RepositoryTag{
+				Tag:     tagged.Tag(),
+				ImageID: assoc.ImageID.String(),
+			})
+		}
+	}
+
+	sort.Sort(byTagName(tagList.TagList))
+	return tagList, nil
+}
+
+// ListRemoteTags fetches a tag list from remote repository.
+func (daemon *Daemon) ListRemoteTags(ref reference.Named, metaHeaders map[string][]string, authConfig *types.AuthConfig) (*types.RepositoryTagList, error) {
+	config := &distribution.ListRemoteTagsConfig{
+		MetaHeaders:     metaHeaders,
+		AuthConfig:      authConfig,
+		RegistryService: daemon.RegistryService,
+	}
+
+	ctx := context.Background()
+
+	return distribution.ListRemoteTags(ctx, ref, config)
 }
 
 // ExecutionDriver returns the currently used driver for creating and
