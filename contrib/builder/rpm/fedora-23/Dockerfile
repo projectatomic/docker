@@ -4,10 +4,18 @@
 
 FROM fedora:23
 
-RUN dnf install -y @development-tools fedora-packager
-RUN dnf install -y btrfs-progs-devel device-mapper-devel glibc-static libaudit-dev libseccomp-devel libselinux-devel libtool-ltdl-devel selinux-policy selinux-policy-devel sqlite-devel tar
+ENV DOCKER_CROSSPLATFORMS \
+        linux/386 linux/arm \
+        darwin/amd64 \
+        freebsd/amd64 freebsd/386 freebsd/arm \
+        windows/amd64 windows/386
 
-ENV SECCOMP_VERSION v2.2.3
+ENV GOARM 5
+
+RUN dnf install -y @development-tools fedora-packager
+RUN dnf install -y audit-libs-devel audit-libs-static btrfs-progs-devel device-mapper-devel glibc-static libseccomp-devel libselinux-devel libtool-ltdl-devel selinux-policy selinux-policy-devel sqlite-devel tar
+
+ENV SECCOMP_VERSION 2.2.3
 RUN buildDeps=' \
 automake \
 libtool \
@@ -15,7 +23,7 @@ libtool \
 && set -x \
 && yum install -y $buildDeps \
 && export SECCOMP_PATH=$(mktemp -d) \
-&& git clone -b "$SECCOMP_VERSION" --depth 1 https://github.com/seccomp/libseccomp.git "$SECCOMP_PATH" \
+&& git clone -b v"$SECCOMP_VERSION" --depth 1 https://github.com/seccomp/libseccomp.git "$SECCOMP_PATH" \
 && ( \
 cd "$SECCOMP_PATH" \
 && ./autogen.sh \
@@ -30,8 +38,12 @@ cd "$SECCOMP_PATH" \
 
 ENV GO_VERSION 1.5.3
 RUN curl -fSL "https://storage.googleapis.com/golang/go${GO_VERSION}.linux-amd64.tar.gz" | tar xzC /usr/local
-ENV PATH $PATH:/usr/local/go/bin
+ENV PATH /usr/local/go/bin:$PATH
 
-ENV AUTO_GOPATH 1
+ENV GOPATH /go:/go/src/github.com/docker/docker/vendor
 
 ENV DOCKER_BUILDTAGS seccomp selinux
+
+WORKDIR /go/src/github.com/docker/docker
+
+COPY . /go/src/github.com/docker/docker

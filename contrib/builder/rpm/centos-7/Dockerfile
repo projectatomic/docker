@@ -4,14 +4,26 @@
 
 FROM centos:7
 
+ENV DOCKER_CROSSPLATFORMS \
+        linux/386 linux/arm \
+        darwin/amd64 \
+        freebsd/amd64 freebsd/386 freebsd/arm \
+        windows/amd64 windows/386
+
+ENV GOARM 5
+
 RUN yum groupinstall -y "Development Tools"
 RUN yum -y swap -- remove systemd-container systemd-container-libs -- install systemd systemd-libs
-RUN yum install -y btrfs-progs-devel device-mapper-devel glibc-static libaudit-dev libselinux-devel libtool-ltdl-devel selinux-policy selinux-policy-devel sqlite-devel tar
+RUN yum install -y audit-libs-devel audit-libs-static btrfs-progs-devel device-mapper-devel glibc-static  libselinux-devel libtool-ltdl-devel selinux-policy selinux-policy-devel sqlite-devel tar
 
 ENV GO_VERSION 1.5.3
 RUN curl -fSL "https://storage.googleapis.com/golang/go${GO_VERSION}.linux-amd64.tar.gz" | tar xzC /usr/local
-ENV PATH $PATH:/usr/local/go/bin
+ENV PATH /usr/local/go/bin:$PATH
 
-ENV AUTO_GOPATH 1
+ENV GOPATH /go:/go/src/github.com/docker/docker/vendor
 
 ENV DOCKER_BUILDTAGS selinux
+
+WORKDIR /go/src/github.com/docker/docker
+
+COPY . /go/src/github.com/docker/docker
