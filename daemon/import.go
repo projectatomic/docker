@@ -92,7 +92,7 @@ func (daemon *Daemon) ImportImage(src string, newRef reference.Named, msg string
 
 	// FIXME: connect with commit code and call refstore directly
 	if newRef != nil {
-		if err := daemon.TagImage(newRef, id.String()); err != nil {
+		if err := daemon.TagImage(newRef, id.String(), true); err != nil {
 			return err
 		}
 	}
