@@ -754,7 +754,7 @@ func NewDaemon(config *Config, registryService *registry.Service) (daemon *Daemo
 
 	eventsService := events.New()
 
-	referenceStore, err := reference.NewReferenceStore(filepath.Join(imageRoot, "repositories.json"))
+	referenceStore, err := reference.NewReferenceStore(filepath.Join(imageRoot, "repositories.json"), registry.DefaultRegistries...)
 	if err != nil {
 		return nil, fmt.Errorf("Couldn't create Tag store repositories: %s", err)
 	}
@@ -974,7 +974,7 @@ func (daemon *Daemon) changes(container *container.Container) ([]archive.Change,
 
 // TagImage creates a tag in the repository reponame, pointing to the image named
 // imageName.
-func (daemon *Daemon) TagImage(newTag reference.Named, imageName string) error {
+func (daemon *Daemon) TagImage(newTag reference.Named, imageName string, keepUnqualified bool) error {
 	imageID, err := daemon.GetImageID(imageName)
 	if err != nil {
 		return err
