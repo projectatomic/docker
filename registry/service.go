@@ -2,6 +2,7 @@ package registry
 
 import (
 	"crypto/tls"
+	"fmt"
 	"net/http"
 	"net/url"
 	"strings"
@@ -32,7 +33,10 @@ func (s *Service) Auth(authConfig *types.AuthConfig) (string, error) {
 	addr := authConfig.ServerAddress
 	if addr == "" {
 		// Use the official registry address if not specified.
-		addr = IndexServer
+		addr = IndexServerAddress()
+	}
+	if addr == "" {
+		return "", fmt.Errorf("No configured registry to authenticate to.")
 	}
 	index, err := s.ResolveIndex(addr)
 	if err != nil {
@@ -97,7 +101,7 @@ func (s *Service) Search(term string, authConfig *types.AuthConfig, headers map[
 
 	if index.Official {
 		localName := remoteName
-		if strings.HasPrefix(localName, "library/") {
+		if strings.HasPrefix(localName, reference.DefaultRepoPrefix) {
 			// If pull "library/foo", it's stored locally under "foo"
 			localName = strings.SplitN(localName, "/", 2)[1]
 		}
@@ -174,15 +178,18 @@ func (s *Service) lookupEndpoints(repoName reference.Named) (endpoints []APIEndp
 		return nil, err
 	}
 
-	if V2Only {
-		return endpoints, nil
+	if !V2Only {
+		legacyEndpoints, err := s.lookupV1Endpoints(repoName)
+		if err != nil {
+			return nil, err
+		}
+		endpoints = append(endpoints, legacyEndpoints...)
 	}
 
-	legacyEndpoints, err := s.lookupV1Endpoints(repoName)
-	if err != nil {
-		return nil, err
+	filtered := filterBlockedEndpoints(endpoints)
+	if len(filtered) == 0 && len(endpoints) > 0 {
+		return nil, fmt.Errorf("All endpoints blocked.")
 	}
-	endpoints = append(endpoints, legacyEndpoints...)
 
-	return endpoints, nil
+	return filtered, nil
 }
