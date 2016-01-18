@@ -54,9 +54,8 @@ func (container *Container) UpdateContainer(hostConfig *container.HostConfig) er
 }
 
 // SecretMount returns the Secret Mount point
-func (container *Container) SecretMount() (execdriver.Mount, error) {
-	var m execdriver.Mount
-	return m, nil
+func (container *Container) SecretMount() (*execdriver.Mount, error) {
+	return nil, nil
 }
 
 // appendNetworkMounts appends any network mounts to the array of mount points passed in.

@@ -144,7 +144,9 @@ func (daemon *Daemon) containerStart(container *container.Container) (err error)
 	if err != nil {
 		return err
 	}
-	mounts = append(mounts, m)
+	if m != nil {
+		mounts = append(mounts, *m)
+	}
 
 	container.Command.Mounts = mounts
 
