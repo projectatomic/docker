@@ -3,6 +3,7 @@
     "dependencies":[
       "  RUN yum -y update && yum install -y \\",
       "  audit-libs-devel \\",
+      "  audit-libs-static \\",
       "  binutils \\",
       "  btrfs-progs-devel \\",
       "  btrfs-progs \\",

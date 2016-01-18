@@ -3,6 +3,7 @@
     "dependencies":[
       "  RUN dnf -y update && dnf install -y \\",
       "  audit-libs-devel \\",
+      "  audit-libs-static\\",
       "  binutils \\",
       "  btrfs-progs-devel \\",
       "  btrfs-progs \\",
@@ -22,6 +23,7 @@
       "  mingw64-gcc \\",
       "  net-tools \\",
       "  php-devel \\",
+      "  procps-ng \\",
       "  python-websocket-client \\",
       "  python-requests \\",
       "  redhat-rpm-config \\",
