@@ -38,6 +38,17 @@ for version in "${versions[@]}"; do
 
 	echo >> "$version/Dockerfile"
 
+	cat <<-'EOF'>> $version/Dockerfile
+	ENV DOCKER_CROSSPLATFORMS \
+	        linux/386 linux/arm \
+	        darwin/amd64 \
+	        freebsd/amd64 freebsd/386 freebsd/arm \
+	        windows/amd64 windows/386
+
+	ENV GOARM 5
+	EOF
+	echo >> "$version/Dockerfile"
+
 	extraBuildTags=
 
 	case "$from" in
@@ -48,14 +59,26 @@ for version in "${versions[@]}"; do
 			if [[ "$version" == "centos-7" ]]; then
 				echo 'RUN yum -y swap -- remove systemd-container systemd-container-libs -- install systemd systemd-libs' >> "$version/Dockerfile"
 			fi
+			audit_packages="audit-libs-devel audit-libs-static" # for "libaudit.h" and libaudit.so/libaudit.a
+			glibc_packages=glibc-static
+			libtool_packages=libtool-ltdl-devel                 # for pkcs11 "ltdl.h"
+			sqlite_packages=sqlite-devel                        # for "sqlite3.h"
 			;;
 		oraclelinux:*)
 			# get "Development Tools" packages and dependencies
 			echo 'RUN yum groupinstall -y "Development Tools"' >> "$version/Dockerfile"
+			audit_packages="audit-libs-devel audit-libs-static" # for "libaudit.h" and libaudit.so/libaudit.a
+			glibc_packages=glibc-static
+			libtool_packages=libtool-ltdl-devel                 # for pkcs11 "ltdl.h"
+			sqlite_packages=sqlite-devel                        # for "sqlite3.h"
 			;;
 		opensuse:*)
 			# get rpm-build and curl packages and dependencies
-			echo 'RUN zypper --non-interactive install ca-certificates* curl gzip rpm-build' >> "$version/Dockerfile"
+			echo 'RUN zypper --non-interactive install ca-certificates* curl git gzip rpm-build' >> "$version/Dockerfile"
+			audit_packages=audit-devel         # for "libaudit.h" and libaudit.so/libaudit.a
+			glibc_packages=glibc-devel-static
+			libtool_packages=libtool           # for pkcs11 "ltdl.h"
+			sqlite_packages=sqlite3-devel      # for "sqlite3.h")
 			;;
 		*)
 			echo "RUN ${installer} install -y @development-tools fedora-packager" >> "$version/Dockerfile"
@@ -64,16 +87,16 @@ for version in "${versions[@]}"; do
 
 	# this list is sorted alphabetically; please keep it that way
 	packages=(
-		audit-libs-devel audit-libs-static # for "libaudit.h" and libaudit.so/libaudit.a
+		$audit_packages
 		btrfs-progs-devel # for "btrfs/ioctl.h" (and "version.h" if possible)
 		device-mapper-devel # for "libdevmapper.h"
-		glibc-static
+		$glibc_packages
 		libseccomp-devel # for "seccomp.h" & "libseccomp.so"
 		libselinux-devel # for "libselinux.so"
-		libtool-ltdl-devel # for pkcs11 "ltdl.h"
+		$libtool_packages
 		selinux-policy
 		selinux-policy-devel
-		sqlite-devel # for "sqlite3.h"
+		$sqlite_packages
 		tar # older versions of dev-tools do not have tar
 	)
 
@@ -122,7 +145,7 @@ for version in "${versions[@]}"; do
 			&& set -x \
 			&& yum install -y $buildDeps \
 			&& export SECCOMP_PATH=$(mktemp -d) \
-			&& git clone -b "$SECCOMP_VERSION" --depth 1 https://github.com/seccomp/libseccomp.git "$SECCOMP_PATH" \
+			&& git clone -b v"$SECCOMP_VERSION" --depth 1 https://github.com/seccomp/libseccomp.git "$SECCOMP_PATH" \
 			&& ( \
 				cd "$SECCOMP_PATH" \
 				&& ./autogen.sh \
@@ -143,11 +166,11 @@ for version in "${versions[@]}"; do
 
 	awk '$1 == "ENV" && $2 == "GO_VERSION" { print; exit }' ../../../Dockerfile >> "$version/Dockerfile"
 	echo 'RUN curl -fSL "https://storage.googleapis.com/golang/go${GO_VERSION}.linux-amd64.tar.gz" | tar xzC /usr/local' >> "$version/Dockerfile"
-	echo 'ENV PATH $PATH:/usr/local/go/bin' >> "$version/Dockerfile"
+	echo 'ENV PATH /usr/local/go/bin:$PATH' >> "$version/Dockerfile"
 
 	echo >> "$version/Dockerfile"
 
-	echo 'ENV AUTO_GOPATH 1' >> "$version/Dockerfile"
+	echo 'ENV GOPATH /go:/go/src/github.com/docker/docker/vendor' >> "$version/Dockerfile"
 
 	echo >> "$version/Dockerfile"
 
@@ -155,4 +178,10 @@ for version in "${versions[@]}"; do
 	buildTags=$( echo "selinux $extraBuildTags" | xargs -n1 | sort -n | tr '\n' ' ' | sed -e 's/[[:space:]]*$//' )
 
 	echo "ENV DOCKER_BUILDTAGS $buildTags" >> "$version/Dockerfile"
+	echo >> "$version/Dockerfile"
+
+	echo "WORKDIR /go/src/github.com/docker/docker" >> "$version/Dockerfile"
+	echo >> "$version/Dockerfile"
+
+	echo "COPY . /go/src/github.com/docker/docker" >> "$version/Dockerfile"
 done
