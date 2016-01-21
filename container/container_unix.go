@@ -745,25 +745,25 @@ func (container *Container) TmpfsMounts() []execdriver.Mount {
 }
 
 // SecretMount returns the Secret Mount point
-func (container *Container) SecretMount() (execdriver.Mount, error) {
+func (container *Container) SecretMount() (*execdriver.Mount, error) {
 	var m execdriver.Mount
 
 	secretsPath, err := container.GetRootResourcePath("secrets")
 	if err != nil {
-		return m, fmt.Errorf("GetSecretsPath failed: %v", err)
+		return &m, fmt.Errorf("GetSecretsPath failed: %v", err)
 	}
 
 	if err := os.RemoveAll(secretsPath); err != nil {
-		return m, fmt.Errorf("RemoveSecretsPath failed: %v", err)
+		return &m, fmt.Errorf("RemoveSecretsPath failed: %v", err)
 	}
 
 	if err := os.MkdirAll(secretsPath, 0700); err != nil {
-		return m, fmt.Errorf("MakeDirSecretsPath failed: %v", err)
+		return &m, fmt.Errorf("MakeDirSecretsPath failed: %v", err)
 	}
 
 	data, err := getHostSecretData()
 	if err != nil {
-		return m, fmt.Errorf("GetHostSecretData failed: %v", err)
+		return &m, fmt.Errorf("GetHostSecretData failed: %v", err)
 	}
 	for _, s := range data {
 		s.SaveTo(secretsPath)
@@ -773,5 +773,5 @@ func (container *Container) SecretMount() (execdriver.Mount, error) {
 
 	m.Source = secretsPath
 	m.Destination = "/run/secret"
-	return m, nil
+	return &m, nil
 }
