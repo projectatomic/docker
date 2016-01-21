@@ -39,7 +39,7 @@ func (cli *DockerCli) CmdLogin(args ...string) error {
 		cli.in = os.Stdin
 	}
 
-	serverAddress := registry.IndexServerName()
+	serverAddress := registry.IndexServerAddress()
 	if len(cmd.Args()) > 0 {
 		serverAddress = cmd.Arg(0)
 	}
