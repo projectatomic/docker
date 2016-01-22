@@ -12,7 +12,6 @@ import (
 	"github.com/docker/docker/pkg/jsonmessage"
 	// FIXME migrate to docker/distribution/reference
 	"github.com/docker/docker/reference"
-	"github.com/docker/docker/registry"
 	runconfigopts "github.com/docker/docker/runconfig/opts"
 	apiclient "github.com/docker/engine-api/client"
 	"github.com/docker/engine-api/types"
@@ -79,14 +78,7 @@ func pullImage(ctx context.Context, dockerCli *client.DockerCli, image string, o
 		return err
 	}
 
-	// Resolve the Repository name from fqn to RepositoryInfo
-	repoInfo, err := registry.ParseRepositoryInfo(ref)
-	if err != nil {
-		return err
-	}
-
-	authConfig := dockerCli.ResolveAuthConfig(ctx, repoInfo.Index)
-	encodedAuth, err := client.EncodeAuthToBase64(authConfig)
+	encodedAuth, err := dockerCli.GetEncodedAuth(ref)
 	if err != nil {
 		return err
 	}

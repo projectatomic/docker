@@ -10,6 +10,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"regexp"
 	"strconv"
 	"strings"
 	"time"
@@ -21,6 +22,10 @@ import (
 	"github.com/docker/go-connections/sockets"
 	"github.com/go-check/check"
 )
+
+type localImageEntry struct {
+	name, tag, id, size string
+}
 
 // Daemon represents a Docker daemon for the testing framework.
 type Daemon struct {
@@ -526,4 +531,89 @@ func (d *Daemon) checkActiveContainerCount(c *check.C) (interface{}, check.Comme
 		return 0, nil
 	}
 	return len(strings.Split(strings.TrimSpace(out), "\n")), check.Commentf("output: %q", string(out))
+}
+
+// getAndTestImageEntry lists  images of given Docker daemon and assert
+// expected values. Unless expectedImageCount is negative, assert the number of
+// images of Docker daemon. Unless repoName is empty, assert it exists and
+// return its matching localImageEntry. If the tag is missing, it won't be
+// checked. Unless expectedImageID is empty, assert that image ID of given
+// repoName matches this one.
+func (d *Daemon) getAndTestImageEntry(c *check.C, expectedImageCount int, repoName, expectedImageID string) *localImageEntry {
+	reRefTagged := regexp.MustCompile(`^(.*):([^:/]+)$`)
+	images := d.getImages(c)
+	if expectedImageCount >= 0 && len(images) != expectedImageCount {
+		switch expectedImageCount {
+		case 0:
+			c.Fatalf("expected empty local image database, got %d images", len(images))
+		case 1:
+			c.Fatalf("expected exactly 1 local image, got %d", len(images))
+		default:
+			c.Fatalf("expected exactly %d local images, got %d", expectedImageCount, len(images))
+		}
+	}
+
+	matchTag := reRefTagged.MatchString(repoName)
+
+	if repoName != "" {
+		img, found := images[repoName]
+		if !found {
+			keys := make([]string, 0, len(images))
+			for k := range images {
+				if !matchTag {
+					if strings.HasPrefix(k, repoName+":") {
+						found = true
+						img = images[k]
+						break
+					}
+				}
+				keys = append(keys, k)
+			}
+			if !found {
+				c.Fatalf("%s missing in list of images: %v", repoName, keys)
+			}
+		}
+
+		if expectedImageID != "" && img.id != expectedImageID {
+			c.Fatalf("image ID of %s does not match expected (%s != %s)", repoName, img.id, expectedImageID)
+		}
+
+		return img
+	}
+	return nil
+}
+
+func (d *Daemon) inspectField(name, field string) (string, error) {
+	format := fmt.Sprintf("{{.%s}}", field)
+	out, err := d.Cmd("inspect", "-f", format, name)
+	if err != nil {
+		return "", fmt.Errorf("failed to inspect %s: %s", name, out)
+	}
+	return strings.TrimSpace(out), nil
+}
+
+// getImages lists images of given Docker daemon and returns it in a
+// map with keys in form <name>:<tag>.
+func (d *Daemon) getImages(c *check.C, args ...string) map[string]*localImageEntry {
+	reImageEntry := regexp.MustCompile(`(?m)^([[:alnum:]/.:_<>-]+)\s+([[:alnum:]._<>-]+)\s+((?:sha\d+:)?[a-fA-F0-9]+)\s+\S+\s+(.+)`)
+	result := make(map[string]*localImageEntry)
+
+	out, err := d.Cmd("images", args...)
+	if err != nil {
+		c.Fatalf("failed to list images: %v", err)
+	}
+	matches := reImageEntry.FindAllStringSubmatch(out, -1)
+	if matches != nil {
+		for i, match := range matches {
+			if i < 1 && match[1] == "REPOSITORY" {
+				continue // skip header
+			}
+			key := match[1]
+			if match[2] != "" && match[2] != "<none>" {
+				key += ":" + match[2]
+			}
+			result[key] = &localImageEntry{match[1], match[2], match[3], match[4]}
+		}
+	}
+	return result
 }

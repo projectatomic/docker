@@ -316,9 +316,10 @@ func notaryError(repoName string, err error) error {
 }
 
 // TrustedPull handles content trust pulling of an image
-func (cli *DockerCli) TrustedPull(ctx context.Context, repoInfo *registry.RepositoryInfo, ref registry.Reference, authConfig types.AuthConfig, requestPrivilege types.RequestPrivilegeFunc) error {
+func (cli *DockerCli) TrustedPull(ctx context.Context, distributionRef reference.Named, repoInfo *registry.RepositoryInfo, ref registry.Reference, requestPrivilege types.RequestPrivilegeFunc) error {
 	var refs []target
 
+	authConfig := cli.ResolveAuthConfig(ctx, repoInfo.Index)
 	notaryRepo, err := cli.getNotaryRepository(repoInfo, authConfig, "pull")
 	if err != nil {
 		fmt.Fprintf(cli.out, "Error establishing connection to trust repository: %s\n", err)
@@ -378,7 +379,7 @@ func (cli *DockerCli) TrustedPull(ctx context.Context, repoInfo *registry.Reposi
 		if err != nil {
 			return err
 		}
-		if err := cli.ImagePullPrivileged(ctx, authConfig, ref.String(), requestPrivilege, false); err != nil {
+		if err := cli.ImagePullPrivileged(ctx, ref, requestPrivilege, false); err != nil {
 			return err
 		}
 
@@ -401,8 +402,8 @@ func (cli *DockerCli) TrustedPull(ctx context.Context, repoInfo *registry.Reposi
 }
 
 // TrustedPush handles content trust pushing of an image
-func (cli *DockerCli) TrustedPush(ctx context.Context, repoInfo *registry.RepositoryInfo, ref reference.Named, authConfig types.AuthConfig, requestPrivilege types.RequestPrivilegeFunc) error {
-	responseBody, err := cli.ImagePushPrivileged(ctx, authConfig, ref.String(), requestPrivilege)
+func (cli *DockerCli) TrustedPush(ctx context.Context, ref reference.Named, repoInfo *registry.RepositoryInfo, requestPrivilege types.RequestPrivilegeFunc) error {
+	responseBody, err := cli.ImagePushPrivileged(ctx, ref, requestPrivilege)
 	if err != nil {
 		return err
 	}
@@ -469,6 +470,7 @@ func (cli *DockerCli) TrustedPush(ctx context.Context, repoInfo *registry.Reposi
 
 	fmt.Fprintln(cli.out, "Signing and pushing trust metadata")
 
+	authConfig := cli.ResolveAuthConfig(context.Background(), repoInfo.Index)
 	repo, err := cli.getNotaryRepository(repoInfo, authConfig, "push", "pull")
 	if err != nil {
 		fmt.Fprintf(cli.out, "Error establishing connection to notary repository: %s\n", err)
@@ -569,9 +571,9 @@ func (cli *DockerCli) addTargetToAllSignableRoles(repo *client.NotaryRepository,
 }
 
 // ImagePullPrivileged pulls the image and displays it to the output
-func (cli *DockerCli) ImagePullPrivileged(ctx context.Context, authConfig types.AuthConfig, ref string, requestPrivilege types.RequestPrivilegeFunc, all bool) error {
+func (cli *DockerCli) ImagePullPrivileged(ctx context.Context, ref reference.Named, requestPrivilege types.RequestPrivilegeFunc, all bool) error {
+	encodedAuth, err := cli.GetEncodedAuth(ref)
 
-	encodedAuth, err := EncodeAuthToBase64(authConfig)
 	if err != nil {
 		return err
 	}
@@ -581,7 +583,7 @@ func (cli *DockerCli) ImagePullPrivileged(ctx context.Context, authConfig types.
 		All:           all,
 	}
 
-	responseBody, err := cli.client.ImagePull(ctx, ref, options)
+	responseBody, err := cli.client.ImagePull(ctx, ref.String(), options)
 	if err != nil {
 		return err
 	}
@@ -591,8 +593,8 @@ func (cli *DockerCli) ImagePullPrivileged(ctx context.Context, authConfig types.
 }
 
 // ImagePushPrivileged push the image
-func (cli *DockerCli) ImagePushPrivileged(ctx context.Context, authConfig types.AuthConfig, ref string, requestPrivilege types.RequestPrivilegeFunc) (io.ReadCloser, error) {
-	encodedAuth, err := EncodeAuthToBase64(authConfig)
+func (cli *DockerCli) ImagePushPrivileged(ctx context.Context, ref reference.Named, requestPrivilege types.RequestPrivilegeFunc) (io.ReadCloser, error) {
+	encodedAuth, err := cli.GetEncodedAuth(ref)
 	if err != nil {
 		return nil, err
 	}
@@ -601,5 +603,5 @@ func (cli *DockerCli) ImagePushPrivileged(ctx context.Context, authConfig types.
 		PrivilegeFunc: requestPrivilege,
 	}
 
-	return cli.client.ImagePush(ctx, ref, options)
+	return cli.client.ImagePush(ctx, ref.String(), options)
 }

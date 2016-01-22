@@ -17,7 +17,7 @@ type Backend interface {
 	CreateManagedNetwork(clustertypes.NetworkCreateRequest) error
 	DeleteManagedNetwork(name string) error
 	SetupIngress(req clustertypes.NetworkCreateRequest, nodeIP string) error
-	PullImage(ctx context.Context, image, tag string, metaHeaders map[string][]string, authConfig *types.AuthConfig, outStream io.Writer) error
+	PullImage(ctx context.Context, image, tag string, metaHeaders map[string][]string, authConfigs map[string]types.AuthConfig, outStream io.Writer) error
 	CreateManagedContainer(types.ContainerCreateConfig) (types.ContainerCreateResponse, error)
 	ContainerStart(name string, hostConfig *container.HostConfig) error
 	ContainerStop(name string, seconds int) error

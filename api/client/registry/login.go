@@ -7,6 +7,7 @@ import (
 
 	"github.com/docker/docker/api/client"
 	"github.com/docker/docker/cli"
+	"github.com/docker/docker/registry"
 	"github.com/spf13/cobra"
 )
 
@@ -57,6 +58,10 @@ func runLogin(dockerCli *client.DockerCli, opts loginOptions) error {
 	} else {
 		serverAddress = dockerCli.ElectAuthServer(ctx)
 		isDefaultRegistry = true
+	}
+	// just for docker.io
+	if serverAddress == registry.IndexName {
+		serverAddress = registry.IndexServer
 	}
 	authConfig, err := dockerCli.ConfigureAuth(opts.user, opts.password, serverAddress, isDefaultRegistry)
 	if err != nil {

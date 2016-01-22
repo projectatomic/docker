@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"net/http"
 	"net/url"
+	"sort"
 	"strings"
 
 	"golang.org/x/net/context"
@@ -27,7 +28,7 @@ type Service interface {
 	LookupPushEndpoints(hostname string) (endpoints []APIEndpoint, err error)
 	ResolveRepository(name reference.Named) (*RepositoryInfo, error)
 	ResolveIndex(name string) (*registrytypes.IndexInfo, error)
-	Search(ctx context.Context, term string, limit int, authConfig *types.AuthConfig, userAgent string, headers map[string][]string) (*registrytypes.SearchResults, error)
+	Search(ctx context.Context, term string, limit int, authConfigs map[string]types.AuthConfig, userAgent string, headers map[string][]string, noIndex bool) ([]registrytypes.SearchResultExt, error)
 	ServiceConfig() *registrytypes.ServiceConfig
 	TLSConfig(hostname string) (*tls.Config, error)
 }
@@ -58,7 +59,11 @@ func (s *DefaultService) Auth(ctx context.Context, authConfig *types.AuthConfig,
 	// TODO Use ctx when searching for repositories
 	serverAddress := authConfig.ServerAddress
 	if serverAddress == "" {
-		serverAddress = IndexServer
+		// Use the official registry address if not specified.
+		serverAddress = IndexServerAddress()
+	}
+	if serverAddress == "" {
+		return "", "", fmt.Errorf("No configured registry to authenticate to.")
 	}
 	if !strings.HasPrefix(serverAddress, "https://") && !strings.HasPrefix(serverAddress, "http://") {
 		serverAddress = "https://" + serverAddress
@@ -94,15 +99,235 @@ func (s *DefaultService) Auth(ctx context.Context, authConfig *types.AuthConfig,
 	return "", "", err
 }
 
+type by func(fst, snd *registrytypes.SearchResultExt) bool
+
+type searchResultSorter struct {
+	Results []registrytypes.SearchResultExt
+	By      func(fst, snd *registrytypes.SearchResultExt) bool
+}
+
+func (by by) Sort(results []registrytypes.SearchResultExt) {
+	rs := &searchResultSorter{
+		Results: results,
+		By:      by,
+	}
+	sort.Sort(rs)
+}
+
+func (s *searchResultSorter) Len() int {
+	return len(s.Results)
+}
+
+func (s *searchResultSorter) Swap(i, j int) {
+	s.Results[i], s.Results[j] = s.Results[j], s.Results[i]
+}
+
+func (s *searchResultSorter) Less(i, j int) bool {
+	return s.By(&s.Results[i], &s.Results[j])
+}
+
+// Factory for search result comparison function. Either it takes index name
+// into consideration or not.
+func getSearchResultsCmpFunc(withIndex bool) by {
+	// Compare two items in the result table of search command. First compare
+	// the index we found the result in. Second compare their rating. Then
+	// compare their fully qualified name (registry/name).
+	less := func(fst, snd *registrytypes.SearchResultExt) bool {
+		if withIndex {
+			if fst.IndexName != snd.IndexName {
+				return fst.IndexName < snd.IndexName
+			}
+			if fst.StarCount != snd.StarCount {
+				return fst.StarCount > snd.StarCount
+			}
+		}
+		if fst.RegistryName != snd.RegistryName {
+			return fst.RegistryName < snd.RegistryName
+		}
+		if !withIndex {
+			if fst.StarCount != snd.StarCount {
+				return fst.StarCount > snd.StarCount
+			}
+		}
+		if fst.Name != snd.Name {
+			return fst.Name < snd.Name
+		}
+		return fst.Description < snd.Description
+	}
+	return less
+}
+
+func (s *DefaultService) searchTerm(term string, limit int, authConfigs map[string]types.AuthConfig, userAgent string, headers map[string][]string, noIndex bool, outs *[]registrytypes.SearchResultExt) error {
+	if err := validateNoScheme(term); err != nil {
+		return err
+	}
+
+	indexName, remoteName := splitReposSearchTerm(term, true)
+
+	index, err := newIndexInfo(s.config, indexName)
+	if err != nil {
+		return err
+	}
+
+	// *TODO: Search multiple indexes.
+	endpoint, err := NewV1Endpoint(index, userAgent, http.Header(headers))
+	if err != nil {
+		return err
+	}
+
+	authConfig := ResolveAuthConfig(authConfigs, index)
+	r, err := NewSession(endpoint.client, &authConfig, endpoint)
+	if err != nil {
+		return err
+	}
+
+	var results *registrytypes.SearchResults
+	if index.Official {
+		localName := remoteName
+		if strings.HasPrefix(localName, reference.DefaultRepoPrefix) {
+			// If pull "library/foo", it's stored locally under "foo"
+			localName = strings.SplitN(localName, "/", 2)[1]
+		}
+
+		results, err = r.SearchRepositories(localName, limit)
+	} else {
+		results, err = r.SearchRepositories(remoteName, limit)
+	}
+	if err != nil || results.NumResults < 1 {
+		return err
+	}
+
+	newOuts := make([]registrytypes.SearchResultExt, len(*outs)+len(results.Results))
+	for i := range *outs {
+		newOuts[i] = (*outs)[i]
+	}
+	for i, result := range results.Results {
+		item := registrytypes.SearchResultExt{
+			IndexName:    index.Name,
+			RegistryName: index.Name,
+			StarCount:    result.StarCount,
+			Name:         result.Name,
+			IsOfficial:   result.IsOfficial,
+			IsAutomated:  result.IsAutomated,
+			Description:  result.Description,
+		}
+		// Check if search result is fully qualified with registry
+		// If not, assume REGISTRY = INDEX
+		newRegistryName, newName := splitReposSearchTerm(result.Name, false)
+		if newRegistryName != "" {
+			item.RegistryName, item.Name = newRegistryName, newName
+		}
+		newOuts[len(*outs)+i] = item
+	}
+	*outs = newOuts
+	return nil
+}
+
+// Duplicate entries may occur in result table when omitting index from output because
+// different indexes may refer to same registries.
+func removeSearchDuplicates(data []registrytypes.SearchResultExt) []registrytypes.SearchResultExt {
+	var (
+		prevIndex = 0
+		res       []registrytypes.SearchResultExt
+	)
+
+	if len(data) > 0 {
+		res = []registrytypes.SearchResultExt{data[0]}
+	}
+	for i := 1; i < len(data); i++ {
+		prev := res[prevIndex]
+		curr := data[i]
+		if prev.RegistryName == curr.RegistryName && prev.Name == curr.Name {
+			// Repositories are equal, delete one of them.
+			// Find out whose index has higher priority (the lower the number
+			// the higher the priority).
+			var prioPrev, prioCurr int
+			for prioPrev = 0; prioPrev < len(DefaultRegistries); prioPrev++ {
+				if prev.IndexName == DefaultRegistries[prioPrev] {
+					break
+				}
+			}
+			for prioCurr = 0; prioCurr < len(DefaultRegistries); prioCurr++ {
+				if curr.IndexName == DefaultRegistries[prioCurr] {
+					break
+				}
+			}
+			if prioPrev > prioCurr || (prioPrev == prioCurr && prev.StarCount < curr.StarCount) {
+				// replace previous entry with current one
+				res[prevIndex] = curr
+			} // otherwise keep previous entry
+		} else {
+			prevIndex++
+			res = append(res, curr)
+		}
+	}
+	return res
+}
+
+// Search queries several registries for images matching the specified
+// search terms, and returns the results.
+func (s *DefaultService) Search(ctx context.Context, term string, limit int, authConfigs map[string]types.AuthConfig, userAgent string, headers map[string][]string, noIndex bool) ([]registrytypes.SearchResultExt, error) {
+	results := []registrytypes.SearchResultExt{}
+	cmpFunc := getSearchResultsCmpFunc(!noIndex)
+
+	// helper for concurrent queries
+	searchRoutine := func(term string, c chan<- error) {
+		err := s.searchTerm(term, limit, authConfigs, userAgent, headers, noIndex, &results)
+		c <- err
+	}
+
+	if isReposSearchTermFullyQualified(term) {
+		if err := s.searchTerm(term, limit, authConfigs, userAgent, headers, noIndex, &results); err != nil {
+			return nil, err
+		}
+	} else if len(DefaultRegistries) < 1 {
+		return nil, fmt.Errorf("No configured repository to search.")
+	} else {
+		var (
+			err              error
+			successfulSearch = false
+			resultChan       = make(chan error)
+		)
+		// query all registries in parallel
+		for i, r := range DefaultRegistries {
+			tmp := term
+			if i > 0 {
+				tmp = fmt.Sprintf("%s/%s", r, term)
+			}
+			go searchRoutine(tmp, resultChan)
+		}
+		for range DefaultRegistries {
+			err = <-resultChan
+			if err == nil {
+				successfulSearch = true
+			} else {
+				logrus.Errorf("%s", err.Error())
+			}
+		}
+		if !successfulSearch {
+			return nil, err
+		}
+	}
+	by(cmpFunc).Sort(results)
+	if noIndex {
+		results = removeSearchDuplicates(results)
+	}
+	return results, nil
+}
+
 // splitReposSearchTerm breaks a search term into an index name and remote name
-func splitReposSearchTerm(reposName string) (string, string) {
+func splitReposSearchTerm(reposName string, fixMissingIndex bool) (string, string) {
 	nameParts := strings.SplitN(reposName, "/", 2)
 	var indexName, remoteName string
 	if len(nameParts) == 1 || (!strings.Contains(nameParts[0], ".") &&
 		!strings.Contains(nameParts[0], ":") && nameParts[0] != "localhost") {
 		// This is a Docker Index repos (ex: samalba/hipache or ubuntu)
 		// 'docker.io'
-		indexName = IndexName
+		if fixMissingIndex {
+			indexName = IndexServerName()
+		} else {
+			indexName = ""
+		}
 		remoteName = reposName
 	} else {
 		indexName = nameParts[0]
@@ -111,42 +336,9 @@ func splitReposSearchTerm(reposName string) (string, string) {
 	return indexName, remoteName
 }
 
-// Search queries the public registry for images matching the specified
-// search terms, and returns the results.
-func (s *DefaultService) Search(ctx context.Context, term string, limit int, authConfig *types.AuthConfig, userAgent string, headers map[string][]string) (*registrytypes.SearchResults, error) {
-	// TODO Use ctx when searching for repositories
-	if err := validateNoScheme(term); err != nil {
-		return nil, err
-	}
-
-	indexName, remoteName := splitReposSearchTerm(term)
-
-	index, err := newIndexInfo(s.config, indexName)
-	if err != nil {
-		return nil, err
-	}
-
-	// *TODO: Search multiple indexes.
-	endpoint, err := NewV1Endpoint(index, userAgent, http.Header(headers))
-	if err != nil {
-		return nil, err
-	}
-
-	r, err := NewSession(endpoint.client, authConfig, endpoint)
-	if err != nil {
-		return nil, err
-	}
-
-	if index.Official {
-		localName := remoteName
-		if strings.HasPrefix(localName, "library/") {
-			// If pull "library/foo", it's stored locally under "foo"
-			localName = strings.SplitN(localName, "/", 2)[1]
-		}
-
-		return r.SearchRepositories(localName, limit)
-	}
-	return r.SearchRepositories(remoteName, limit)
+func isReposSearchTermFullyQualified(term string) bool {
+	indexName, _ := splitReposSearchTerm(term, false)
+	return indexName != ""
 }
 
 // ResolveRepository splits a repository name into its components
@@ -215,12 +407,16 @@ func (s *DefaultService) lookupEndpoints(hostname string) (endpoints []APIEndpoi
 	if s.config.V2Only {
 		return endpoints, nil
 	}
-
 	legacyEndpoints, err := s.lookupV1Endpoints(hostname)
 	if err != nil {
 		return nil, err
 	}
 	endpoints = append(endpoints, legacyEndpoints...)
 
-	return endpoints, nil
+	filtered := filterBlockedEndpoints(endpoints)
+	if len(filtered) == 0 && len(endpoints) > 0 {
+		return nil, fmt.Errorf("All endpoints blocked.")
+	}
+
+	return filtered, nil
 }

@@ -7,6 +7,7 @@ import (
 
 	"github.com/docker/docker/api/client"
 	"github.com/docker/docker/cli"
+	"github.com/docker/docker/registry"
 	"github.com/spf13/cobra"
 )
 
@@ -34,6 +35,10 @@ func runLogout(dockerCli *client.DockerCli, serverAddress string) error {
 
 	if serverAddress == "" {
 		serverAddress = dockerCli.ElectAuthServer(ctx)
+	}
+	// just for docker.io
+	if serverAddress == registry.IndexName {
+		serverAddress = registry.IndexServer
 	}
 
 	// check if we're logged in based on the records in the config file

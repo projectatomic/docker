@@ -140,6 +140,7 @@ information about the devicemapper storage driver is shown:
     Insecure registries:
      myinsecurehost:5000
      127.0.0.0/8
+    Registries: docker.io (secure), 127.0.0.0/8 (insecure)
 
 # HISTORY
 April 2014, Originally compiled by William Henry (whenry at redhat dot com)

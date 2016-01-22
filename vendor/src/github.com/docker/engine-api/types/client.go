@@ -217,6 +217,7 @@ type ImageRemoveOptions struct {
 // ImageSearchOptions holds parameters to search images with.
 type ImageSearchOptions struct {
 	RegistryAuth  string
+	NoIndex       bool
 	PrivilegeFunc RequestPrivilegeFunc
 	Filters       filters.Args
 	Limit         int

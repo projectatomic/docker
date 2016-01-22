@@ -187,3 +187,28 @@ func (s *DockerSuite) TestInsecureRegistries(c *check.C) {
 	c.Assert(out, checker.Contains, fmt.Sprintf(" %s\n", registryHost))
 	c.Assert(out, checker.Contains, fmt.Sprintf(" %s\n", registryCIDR))
 }
+
+func (s *DockerSuite) TestInfoRegistries(c *check.C) {
+	out, _ := dockerCmd(c, "info")
+	c.Assert(out, checker.Contains, "docker.io (secure)")
+}
+
+func (s *DockerRegistrySuite) TestInfoRegistriesAdditional(c *check.C) {
+	d := NewDaemon(c)
+
+	c.Assert(d.StartWithBusybox("--add-registry="+s.reg.url, "--block-registry=public"), check.IsNil)
+	out, _ := d.Cmd("info")
+	c.Assert(out, checker.Contains, s.reg.url+" (insecure)")
+	c.Assert(out, checker.Not(checker.Contains), "docker.io (secure)")
+
+	c.Assert(d.Restart("--add-registry="+s.reg.url, "--block-registry=all"), check.IsNil)
+	out, _ = d.Cmd("info")
+	c.Assert(out, checker.Contains, s.reg.url+" (insecure)")
+	c.Assert(out, checker.Not(checker.Contains), "docker.io (secure)")
+
+	c.Assert(d.Restart("--add-registry="+s.reg.url), check.IsNil)
+	out, _ = d.Cmd("info")
+	c.Assert(out, checker.Contains, fmt.Sprintf("%s (insecure), docker.io (secure)", s.reg.url))
+
+	d.Stop()
+}

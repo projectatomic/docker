@@ -95,6 +95,8 @@ type CommonConfig struct {
 	CorsHeaders          string              `json:"api-cors-header,omitempty"`
 	EnableCors           bool                `json:"api-enable-cors,omitempty"`
 	LiveRestore          bool                `json:"live-restore,omitempty"`
+	BlockedRegistries    []string            `json:"block-registry,omitempty"`
+	AdditionalRegistries []string            `json:"add-registry,omitempty"`
 
 	// ClusterStore is the storage backend used for the cluster information. It is used by both
 	// multihost networking (to store networks and endpoints information) and by the node discovery
@@ -169,6 +171,9 @@ func (config *Config) InstallCommonFlags(cmd *flag.FlagSet, usageFn func(string)
 
 	config.MaxConcurrentDownloads = &maxConcurrentDownloads
 	config.MaxConcurrentUploads = &maxConcurrentUploads
+
+	cmd.Var(opts.NewListOptsRef(&config.BlockedRegistries, registry.ValidateIndexName), []string{"-block-registry"}, usageFn("Don't contact given registry"))
+	cmd.Var(opts.NewListOptsRef(&config.AdditionalRegistries, registry.ValidateIndexName), []string{"-add-registry"}, usageFn("Registry to query before a public one"))
 }
 
 // IsValueSet returns true if a configuration value
