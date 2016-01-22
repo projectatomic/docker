@@ -15,7 +15,6 @@ import (
 	"net/http"
 	"net/http/cookiejar"
 	"net/url"
-	"regexp"
 	"strconv"
 	"strings"
 	"time"
@@ -33,7 +32,6 @@ var (
 	// ErrRepoNotFound is returned if the repository didn't exist on the
 	// remote side
 	ErrRepoNotFound = errors.New("Repository not found")
-	reURLScheme     = regexp.MustCompile(`^[^:]+://`)
 )
 
 // A Session is used to communicate with a V1 registry
@@ -165,17 +163,6 @@ func (tr *authTransport) CancelRequest(req *http.Request) {
 // NewSession creates a new session
 // TODO(tiborvass): remove authConfig param once registry client v2 is vendored
 func NewSession(client *http.Client, authConfig *cliconfig.AuthConfig, endpoint *Endpoint) (r *Session, err error) {
-	if authConfig != nil && authConfig.ServerAddress != "" {
-		serverAddress := authConfig.ServerAddress
-		if !reURLScheme.MatchString(serverAddress) {
-			serverAddress = "http://" + serverAddress
-		}
-		parsed, err := url.Parse(serverAddress)
-		if err == nil && parsed.Host != endpoint.URL.Host {
-			logrus.Infof("authConfig does not conform to given endpoint (%s != %s)", parsed.Host, endpoint.URL.Host)
-			*authConfig = cliconfig.AuthConfig{}
-		}
-	}
 	r = &Session{
 		authConfig:    authConfig,
 		client:        client,
