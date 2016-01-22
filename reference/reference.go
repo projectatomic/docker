@@ -119,6 +119,9 @@ type canonicalRef struct {
 
 func (r *namedRef) FullName() string {
 	hostname, remoteName := splitHostname(r.Name())
+	if hostname == "" {
+		return remoteName
+	}
 	return hostname + "/" + remoteName
 }
 func (r *namedRef) Hostname() string {
@@ -156,12 +159,12 @@ func IsNameOnly(ref Named) bool {
 }
 
 // splitHostname splits a repository name to hostname and remotename string.
-// If no valid hostname is found, the default hostname is used. Repository name
-// needs to be already validated before.
+// If no valid hostname is found, empty string will be returned as a resulting
+// hostname. Repository name needs to be already validated before.
 func splitHostname(name string) (hostname, remoteName string) {
 	i := strings.IndexRune(name, '/')
 	if i == -1 || (!strings.ContainsAny(name[:i], ".:") && name[:i] != "localhost") {
-		hostname, remoteName = DefaultHostname, name
+		hostname, remoteName = "", name
 	} else {
 		hostname, remoteName = name[:i], name[i+1:]
 	}
@@ -175,7 +178,7 @@ func splitHostname(name string) (hostname, remoteName string) {
 }
 
 // normalize returns a repository name in its normalized form, meaning it
-// will not contain default hostname nor library/ prefix for official images.
+// will (not in upstream docker) contain default hostname nor library/ prefix for official images.
 func normalize(name string) (string, error) {
 	host, remoteName := splitHostname(name)
 	if strings.ToLower(remoteName) != remoteName {
@@ -183,15 +186,15 @@ func normalize(name string) (string, error) {
 	}
 	if host == DefaultHostname {
 		if strings.HasPrefix(remoteName, DefaultRepoPrefix) {
-			return strings.TrimPrefix(remoteName, DefaultRepoPrefix), nil
+			remoteName = strings.TrimPrefix(remoteName, DefaultRepoPrefix)
 		}
-		return remoteName, nil
+		return host + "/" + remoteName, nil
 	}
 	return name, nil
 }
 
 func validateName(name string) error {
-	if err := v1.ValidateID(name); err == nil {
+	if err := v1.ValidateID(strings.TrimPrefix(name, DefaultHostname+"/")); err == nil {
 		return fmt.Errorf("Invalid repository name (%s), cannot specify 64-byte hexadecimal strings", name)
 	}
 	return nil

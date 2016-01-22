@@ -11,6 +11,7 @@ import (
 	Cli "github.com/docker/docker/cli"
 	flag "github.com/docker/docker/pkg/mflag"
 	"github.com/docker/docker/pkg/term"
+	"github.com/docker/docker/registry"
 	"github.com/docker/engine-api/client"
 	"github.com/docker/engine-api/types"
 )
@@ -40,6 +41,11 @@ func (cli *DockerCli) CmdLogin(args ...string) error {
 		serverAddress = cmd.Arg(0)
 	} else {
 		serverAddress = cli.electAuthServer()
+	}
+
+	// XXX: just for docker.io
+	if serverAddress == registry.IndexName {
+		serverAddress = registry.IndexServer
 	}
 
 	authConfig, err := cli.configureAuth(*flUser, *flPassword, *flEmail, serverAddress)
