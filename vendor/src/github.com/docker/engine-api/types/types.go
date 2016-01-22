@@ -382,6 +382,20 @@ type MountPoint struct {
 	Propagation string
 }
 
+// RepositoryTag stores an metadata for a image's tag.
+type RepositoryTag struct {
+	Tag     string
+	ImageID string
+}
+
+// RepositoryTagList contains the response for the remote API:
+// GET "/images/{name:.*}/tags"
+type RepositoryTagList struct {
+	// Fully qualified repository name
+	Name    string
+	TagList []*RepositoryTag
+}
+
 // Volume represents the configuration of a volume for the remote API
 type Volume struct {
 	Name       string // Name is the name of the volume
