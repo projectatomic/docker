@@ -48,9 +48,7 @@ func runPush(dockerCli *command.DockerCli, name string) error {
 	if err != nil {
 		return err
 	}
-	authConfig := command.ResolveAuthConfig(ctx, dockerCli, repoInfo.Index)
-
-	encodedAuth, err := command.EncodeAuthToBase64(authConfig)
+	encodedAuth, err := command.GetEncodedAuth(dockerCli, named)
 	if err != nil {
 		return err
 	}
@@ -62,6 +60,7 @@ func runPush(dockerCli *command.DockerCli, name string) error {
 	defer responseBody.Close()
 
 	if command.IsTrusted() {
+		authConfig := command.ResolveAuthConfig(ctx, dockerCli, repoInfo.Index)
 		repoInfo.Class = "plugin"
 		return image.PushTrustedReference(dockerCli, repoInfo, named, authConfig, responseBody)
 	}

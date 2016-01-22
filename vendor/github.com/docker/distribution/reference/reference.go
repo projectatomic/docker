@@ -96,7 +96,7 @@ func (f Field) MarshalText() (p []byte, err error) {
 // reference parser to ensure the appropriately
 // typed reference object is wrapped by field.
 func (f *Field) UnmarshalText(p []byte) error {
-	r, err := Parse(string(p))
+	r, err := Parse(string(p), false, false)
 	if err != nil {
 		return err
 	}
@@ -186,7 +186,7 @@ func SplitHostname(named Named) (string, string) {
 // Parse parses s and returns a syntactically valid Reference.
 // If an error was encountered it is returned, along with a nil Reference.
 // NOTE: Parse will not handle short digests.
-func Parse(s string) (Reference, error) {
+func Parse(s string, unqualified, noprefix bool) (Reference, error) {
 	matches := ReferenceRegexp.FindStringSubmatch(s)
 	if matches == nil {
 		if s == "" {
@@ -206,7 +206,16 @@ func Parse(s string) (Reference, error) {
 
 	nameMatch := anchoredNameRegexp.FindStringSubmatch(matches[1])
 	if nameMatch != nil && len(nameMatch) == 3 {
-		repo.domain = nameMatch[1]
+		if unqualified {
+			repo.domain = ""
+		} else {
+			repo.domain = nameMatch[1]
+		}
+		if noprefix {
+			if strings.HasPrefix(nameMatch[2], "library/") {
+				nameMatch[2] = strings.Replace(nameMatch[2], "library/", "", -1)
+			}
+		}
 		repo.path = nameMatch[2]
 	} else {
 		repo.domain = ""

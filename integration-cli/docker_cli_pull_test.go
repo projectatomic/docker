@@ -2,12 +2,14 @@ package main
 
 import (
 	"fmt"
+	"net/http"
 	"regexp"
 	"strings"
 	"sync"
 	"time"
 
 	"github.com/docker/docker/integration-cli/checker"
+	"github.com/docker/docker/registry"
 	"github.com/go-check/check"
 	"github.com/opencontainers/go-digest"
 )
@@ -20,11 +22,11 @@ func (s *DockerHubPullSuite) TestPullFromCentralRegistry(c *check.C) {
 	defer deleteImages("hello-world")
 
 	c.Assert(out, checker.Contains, "Using default tag: latest", check.Commentf("expected the 'latest' tag to be automatically assumed"))
-	c.Assert(out, checker.Contains, "Pulling from library/hello-world", check.Commentf("expected the 'library/' prefix to be automatically assumed"))
-	c.Assert(out, checker.Contains, "Downloaded newer image for hello-world:latest")
+	c.Assert(regexp.MustCompile(`Pulling.*from.*library/hello-world\b`).MatchString(out), checker.Equals, true, check.Commentf("expected the 'library/' prefix to be automatically assumed in: %s", out))
+	c.Assert(out, checker.Contains, "Downloaded newer image for docker.io/hello-world:latest")
 
 	matches := regexp.MustCompile(`Digest: (.+)\n`).FindAllStringSubmatch(out, -1)
-	c.Assert(len(matches), checker.Equals, 1, check.Commentf("expected exactly one image digest in the output"))
+	c.Assert(len(matches), checker.Equals, 1, check.Commentf("expected exactly one image digest in the output: %s", out))
 	c.Assert(len(matches[0]), checker.Equals, 2, check.Commentf("unexpected number of submatches for the digest"))
 	_, err := digest.Parse(matches[0][1])
 	c.Check(err, checker.IsNil, check.Commentf("invalid digest %q in output", matches[0][1]))
@@ -33,7 +35,7 @@ func (s *DockerHubPullSuite) TestPullFromCentralRegistry(c *check.C) {
 	img := strings.TrimSpace(s.Cmd(c, "images"))
 	splitImg := strings.Split(img, "\n")
 	c.Assert(splitImg, checker.HasLen, 2)
-	c.Assert(splitImg[1], checker.Matches, `hello-world\s+latest.*?`, check.Commentf("invalid output for `docker images` (expected image and tag name"))
+	c.Assert(splitImg[1], checker.Matches, `docker\.io/hello-world\s+latest.*?`, check.Commentf("invalid output for `docker images` (expected image and tag name"))
 }
 
 // TestPullNonExistingImage pulls non-existing images from the central registry, with different
@@ -98,11 +100,11 @@ func (s *DockerHubPullSuite) TestPullNonExistingImage(c *check.C) {
 	for record := range recordChan {
 		if len(record.option) == 0 {
 			c.Assert(record.err, checker.NotNil, check.Commentf("expected non-zero exit status when pulling non-existing image: %s", record.out))
-			c.Assert(record.out, checker.Contains, fmt.Sprintf("repository %s not found: does not exist or no pull access", record.e.repo), check.Commentf("expected image not found error messages"))
+			c.Assert(record.out, checker.Contains, fmt.Sprintf("%s not found: does not exist or no pull access", record.e.repo), check.Commentf("expected image not found error messages"))
 		} else {
 			// pull -a on a nonexistent registry should fall back as well
 			c.Assert(record.err, checker.NotNil, check.Commentf("expected non-zero exit status when pulling non-existing image: %s", record.out))
-			c.Assert(record.out, checker.Contains, fmt.Sprintf("repository %s not found", record.e.repo), check.Commentf("expected image not found error messages"))
+			c.Assert(record.out, checker.Contains, fmt.Sprintf("%s not found", record.e.repo), check.Commentf("expected image not found error messages"))
 			c.Assert(record.out, checker.Not(checker.Contains), "unauthorized", check.Commentf(`message should not contain "unauthorized"`))
 		}
 	}
@@ -168,7 +170,7 @@ func (s *DockerHubPullSuite) TestPullFromCentralRegistryImplicitRefParts(c *chec
 			s.Cmd(c, "rmi", ref)
 			s.Cmd(c, "tag", "hello-world-backup", "hello-world")
 		}
-		c.Assert(out, checker.Contains, "Image is up to date for hello-world:latest")
+		c.Assert(out, checker.Contains, "Image is up to date for docker.io/hello-world:latest")
 	}
 
 	s.Cmd(c, "rmi", "hello-world-backup")
@@ -177,7 +179,7 @@ func (s *DockerHubPullSuite) TestPullFromCentralRegistryImplicitRefParts(c *chec
 	img := strings.TrimSpace(s.Cmd(c, "images"))
 	splitImg := strings.Split(img, "\n")
 	c.Assert(splitImg, checker.HasLen, 2)
-	c.Assert(splitImg[1], checker.Matches, `hello-world\s+latest.*?`, check.Commentf("invalid output for `docker images` (expected image and tag name"))
+	c.Assert(splitImg[1], checker.Matches, `docker\.io/hello-world\s+latest.*?`, check.Commentf("invalid output for `docker images` (expected image and tag name"))
 }
 
 // TestPullScratchNotAllowed verifies that pulling 'scratch' is rejected.
@@ -206,7 +208,7 @@ func (s *DockerHubPullSuite) TestPullAllTagsFromCentralRegistry(c *check.C) {
 	// Verify that the line for 'busybox:latest' is left unchanged.
 	var latestLine string
 	for _, line := range strings.Split(outImageAllTagCmd, "\n") {
-		if strings.HasPrefix(line, "busybox") && strings.Contains(line, "latest") {
+		if strings.HasPrefix(line, "docker.io/busybox") && strings.Contains(line, "latest") {
 			latestLine = line
 			break
 		}
@@ -271,4 +273,248 @@ func (s *DockerSuite) TestPullLinuxImageFailsOnWindows(c *check.C) {
 	testRequires(c, DaemonIsWindows, Network)
 	_, _, err := dockerCmdWithError("pull", "ubuntu")
 	c.Assert(err.Error(), checker.Contains, "cannot be used on this platform")
+}
+
+func (s *DockerRegistrySuite) TestPullFromAdditionalRegistry(c *check.C) {
+	testRequires(c, DaemonIsLinux)
+	testRequires(c, Network)
+
+	s.d.StartWithBusybox(c, "--add-registry="+s.reg.URL())
+
+	bbImg := s.d.GetAndTestImageEntry(c, 1, "busybox", "")
+
+	// this will pull from docker.io
+	if _, err := s.d.Cmd("pull", "library/hello-world"); err != nil {
+		c.Fatalf("we should have been able to pull library/hello-world from %q: %v", s.reg.URL(), err)
+	}
+
+	hwImg := s.d.GetAndTestImageEntry(c, 2, "docker.io/hello-world", "")
+	if hwImg.Id == bbImg.Id || hwImg.Size == bbImg.Size {
+		c.Fatalf("docker.io/hello-world must have different ID and size than busybox image")
+	}
+
+	// push busybox to additional registry as "library/hello-world" and remove all local images
+	if out, err := s.d.Cmd("tag", "busybox", s.reg.URL()+"/library/hello-world"); err != nil {
+		c.Fatalf("failed to tag image %s: error %v, output %q", "busybox", err, out)
+	}
+	if out, err := s.d.Cmd("push", s.reg.URL()+"/library/hello-world"); err != nil {
+		c.Fatalf("failed to push image %s: error %v, output %q", s.reg.URL()+"/library/hello-world", err, out)
+	}
+	toRemove := []string{"rmi", "library/hello-world", "busybox", "docker.io/hello-world"}
+	if out, err := s.d.Cmd(toRemove...); err != nil {
+		c.Fatalf("failed to remove images %v: %v, output: %s", toRemove, err, out)
+	}
+	s.d.GetAndTestImageEntry(c, 0, "", "")
+
+	// pull the same name again - now the image should be pulled from additional registry
+	if _, err := s.d.Cmd("pull", "library/hello-world"); err != nil {
+		c.Fatalf("we should have been able to pull library/hello-world from %q: %v", s.reg.URL(), err)
+	}
+	hw2Img := s.d.GetAndTestImageEntry(c, 1, s.reg.URL()+"/library/hello-world", "")
+	if hw2Img.Size != bbImg.Size {
+		c.Fatalf("expected %s and %s to have the same size (%s != %s)", hw2Img.Name, bbImg.Name, hw2Img.Size, hwImg.Size)
+	}
+
+	// empty images once more
+	if out, err := s.d.Cmd("rmi", s.reg.URL()+"/library/hello-world"); err != nil {
+		c.Fatalf("failed to remove image %s: %v, output: %s", s.reg.URL()+"library/hello-world", err, out)
+	}
+	s.d.GetAndTestImageEntry(c, 0, "", "")
+
+	// now pull with fully qualified name
+	if _, err := s.d.Cmd("pull", "docker.io/library/hello-world"); err != nil {
+		c.Fatalf("we should have been able to pull docker.io/library/hello-world from %q: %v", s.reg.URL(), err)
+	}
+	hw3Img := s.d.GetAndTestImageEntry(c, 1, "docker.io/hello-world", "")
+	if hw3Img.Size != hwImg.Size {
+		c.Fatalf("expected %s and %s to have the same size (%s != %s)", hw3Img.Name, hwImg.Name, hw3Img.Size, hwImg.Size)
+	}
+}
+
+func (s *DockerRegistriesSuite) TestPullFromAdditionalRegistries(c *check.C) {
+	testRequires(c, DaemonIsLinux)
+	testRequires(c, Network)
+
+	daemonArgs := []string{"--add-registry=" + s.reg1.URL(), "--add-registry=" + s.reg2.URL()}
+	s.d.StartWithBusybox(c, daemonArgs...)
+
+	bbImg := s.d.GetAndTestImageEntry(c, 1, "busybox", "")
+
+	// this will pull from docker.io
+	if out, err := s.d.Cmd("pull", "library/hello-world"); err != nil {
+		c.Fatalf("we should have been able to pull library/hello-world from \"docker.io\": %s\n\nError:%v", out, err)
+	}
+	hwImg := s.d.GetAndTestImageEntry(c, 2, "docker.io/hello-world", "")
+	if hwImg.Id == bbImg.Id {
+		c.Fatalf("docker.io/hello-world must have different ID than busybox image")
+	}
+
+	// push:
+	//  hello-world to 1st additional registry as "misc/hello-world"
+	//  busybox to 2nd additional registry as "library/hello-world"
+	if out, err := s.d.Cmd("tag", "docker.io/hello-world", s.reg1.URL()+"/misc/hello-world"); err != nil {
+		c.Fatalf("failed to tag image %s: error %v, output %q", "docker.io/hello-world", err, out)
+	}
+	if out, err := s.d.Cmd("tag", "busybox", s.reg2.URL()+"/library/hello-world"); err != nil {
+		c.Fatalf("failed to tag image %s: error %v, output %q", "/busybox", err, out)
+	}
+	if out, err := s.d.Cmd("push", s.reg1.URL()+"/misc/hello-world"); err != nil {
+		c.Fatalf("failed to push image %s: error %v, output %q", s.reg1.URL()+"/misc/hello-world", err, out)
+	}
+	if out, err := s.d.Cmd("push", s.reg2.URL()+"/library/hello-world"); err != nil {
+		c.Fatalf("failed to push image %s: error %v, output %q", s.reg2.URL()+"/library/busybox", err, out)
+	}
+	// and remove all local images
+	toRemove := []string{"rmi", "misc/hello-world", s.reg2.URL() + "/library/hello-world", "busybox", "docker.io/hello-world"}
+	if out, err := s.d.Cmd(toRemove...); err != nil {
+		c.Fatalf("failed to remove images %v: %v, output: %s", toRemove, err, out)
+	}
+	s.d.GetAndTestImageEntry(c, 0, "", "")
+
+	// now pull the "library/hello-world" from 2nd additional registry
+	if _, err := s.d.Cmd("pull", "library/hello-world"); err != nil {
+		c.Fatalf("we should have been able to pull library/hello-world from %q: %v", s.reg2.URL(), err)
+	}
+	hw2Img := s.d.GetAndTestImageEntry(c, 1, s.reg2.URL()+"/library/hello-world", "")
+	if hw2Img.Size != bbImg.Size {
+		c.Fatalf("expected %s and %s to have the same size (%s != %s)", hw2Img.Name, bbImg.Name, hw2Img.Size, bbImg.Size)
+	}
+
+	// now pull the "misc/hello-world" from 1st additional registry
+	if _, err := s.d.Cmd("pull", "misc/hello-world"); err != nil {
+		c.Fatalf("we should have been able to pull misc/hello-world from %q: %v", s.reg2.URL(), err)
+	}
+	hw3Img := s.d.GetAndTestImageEntry(c, 2, s.reg1.URL()+"/misc/hello-world", "")
+	if hw3Img.Size != hwImg.Size {
+		c.Fatalf("expected %s and %s to have the same size (%s != %s)", hw3Img.Name, hwImg.Name, hw3Img.Size, hwImg.Size)
+	}
+
+	// tag it as library/hello-world and push it to 1st registry
+	if out, err := s.d.Cmd("tag", s.reg1.URL()+"/misc/hello-world", s.reg1.URL()+"/library/hello-world"); err != nil {
+		c.Fatalf("failed to tag image %s: error %v, output %q", s.reg1.URL()+"/misc/hello-world", err, out)
+	}
+	if out, err := s.d.Cmd("push", s.reg1.URL()+"/library/hello-world"); err != nil {
+		c.Fatalf("failed to push image %s: error %v, output %q", s.reg1.URL()+"/library/hello-world", err, out)
+	}
+
+	// remove all images
+	toRemove = []string{"rmi", s.reg1.URL() + "/misc/hello-world", s.reg1.URL() + "/library/hello-world", s.reg2.URL() + "/library/hello-world"}
+	if out, err := s.d.Cmd(toRemove...); err != nil {
+		c.Fatalf("failed to remove images %v: %v, output: %s", toRemove, err, out)
+	}
+	s.d.GetAndTestImageEntry(c, 0, "", "")
+
+	// now pull "library/hello-world" from 1st additional registry
+	if _, err := s.d.Cmd("pull", "library/hello-world"); err != nil {
+		c.Fatalf("we should have been able to pull library/hello-world from %q: %v", s.reg1.URL(), err)
+	}
+	hw4Img := s.d.GetAndTestImageEntry(c, 1, s.reg1.URL()+"/library/hello-world", "")
+	if hw4Img.Size != hwImg.Size {
+		c.Fatalf("expected %s and %s to have the same size (%s != %s)", hw4Img.Name, hwImg.Name, hw4Img.Size, hwImg.Size)
+	}
+
+	// now pull fully qualified image from 2nd registry
+	if _, err := s.d.Cmd("pull", s.reg2.URL()+"/library/hello-world"); err != nil {
+		c.Fatalf("we should have been able to pull %s/library/hello-world: %v", s.reg2.URL(), err)
+	}
+	bb2Img := s.d.GetAndTestImageEntry(c, 2, s.reg2.URL()+"/library/hello-world", "")
+	if bb2Img.Size != bbImg.Size {
+		c.Fatalf("expected %s and %s to have the same size (%s != %s)", bb2Img.Name, bbImg.Name, bb2Img.Size, bbImg.Size)
+	}
+}
+
+func (s *DockerRegistriesSuite) TestPullFromBlockedRegistry(c *check.C) {
+	testRequires(c, DaemonIsLinux)
+	testRequires(c, Network)
+
+	daemonArgs := []string{"--block-registry=" + s.reg1.URL(), "--add-registry=" + s.reg2.URL()}
+	s.d.StartWithBusybox(c, daemonArgs...)
+
+	bbImg := s.d.GetAndTestImageEntry(c, 1, "busybox", "")
+
+	// pull image from docker.io
+	if _, err := s.d.Cmd("pull", "library/hello-world"); err != nil {
+		c.Fatalf("we should have been able to pull library/hello-world from \"docker.io\": %v", err)
+	}
+	hwImg := s.d.GetAndTestImageEntry(c, 2, "docker.io/hello-world", "")
+	if hwImg.Size == bbImg.Size {
+		c.Fatalf("docker.io/hello-world must have different size than busybox image")
+	}
+
+	// push "hello-world" to blocked and additional registry and remove all local images
+	if out, err := s.d.Cmd("tag", "busybox", s.reg1.URL()+"/library/hello-world"); err != nil {
+		c.Fatalf("failed to tag image %s: error %v, output %q", "busybox", err, out)
+	}
+	if out, err := s.d.Cmd("tag", "busybox", s.reg2.URL()+"/library/hello-world"); err != nil {
+		c.Fatalf("failed to tag image %s: error %v, output %q", "busybox", err, out)
+	}
+	if out, err := s.d.Cmd("push", s.reg1.URL()+"/library/hello-world"); err == nil {
+		c.Fatalf("push to blocked registry should have failed, output: %q", out)
+	}
+	if out, err := s.d.Cmd("push", s.reg2.URL()+"/library/hello-world"); err != nil {
+		c.Fatalf("failed to push image %s: error %v, output %q", s.reg2.URL()+"/library/hello-world", err, out)
+	}
+	toRemove := []string{"rmi", "library/hello-world", s.reg1.URL() + "/library/hello-world", "docker.io/hello-world", "busybox"}
+	if out, err := s.d.Cmd(toRemove...); err != nil {
+		c.Fatalf("failed to remove images %v: %v, output: %s", toRemove, err, out)
+	}
+	s.d.GetAndTestImageEntry(c, 0, "", "")
+
+	// try to pull "library/hello-world" from blocked registry
+	if out, err := s.d.Cmd("pull", s.reg1.URL()+"/library/hello-world"); err == nil {
+		c.Fatalf("pull of library/hello-world from additional registry should have failed, output: %q", out)
+	}
+
+	// now pull the "library/hello-world" from additional registry
+	if _, err := s.d.Cmd("pull", s.reg2.URL()+"/library/hello-world"); err != nil {
+		c.Fatalf("we should have been able to pull library/hello-world from %q: %v", s.reg2.URL(), err)
+	}
+	bb2Img := s.d.GetAndTestImageEntry(c, 1, s.reg2.URL()+"/library/hello-world", "")
+	if bb2Img.Size != bbImg.Size {
+		c.Fatalf("expected %s and %s to have the same size (%s != %s)", bb2Img.Name, bbImg.Name, bb2Img.Size, bbImg.Size)
+	}
+}
+
+func (s *DockerRegistriesSuite) TestPullNeedsAuth(c *check.C) {
+	s.d.StartWithBusybox(c, "--add-registry="+s.regWithAuth.URL())
+
+	repo := fmt.Sprintf("%s/runcom/busybox", s.regWithAuth.URL())
+	repoUnqualified := "runcom/busybox"
+
+	out, err := s.d.Cmd("tag", "busybox", repo)
+	c.Assert(err, check.IsNil, check.Commentf(out))
+
+	// this means it needs auth...
+	resp, err := http.Get(fmt.Sprintf("http://%s/v2/", s.regWithAuth.URL()))
+	c.Assert(err, check.IsNil)
+	c.Assert(resp.StatusCode, check.Equals, http.StatusUnauthorized)
+
+	// login with the registry...
+	out, err = s.d.Cmd("login", "-u", s.regWithAuth.Username(), "-p", s.regWithAuth.Password(), s.regWithAuth.URL())
+	c.Assert(err, check.IsNil, check.Commentf(out))
+
+	// push the image so we can pull from unqualified "runcom/busybox"
+	out, err = s.d.Cmd("push", repo)
+	c.Assert(err, check.IsNil, check.Commentf(out))
+
+	out, err = s.d.Cmd("rmi", "-f", repoUnqualified)
+	c.Assert(err, check.IsNil, check.Commentf(out))
+
+	out, err = s.d.Cmd("pull", repoUnqualified)
+	c.Assert(err, check.IsNil, check.Commentf(out))
+	// check it's pulling from private reg with auth with unqualified images and not docker.io
+	if strings.Contains(out, registry.DefaultNamespace) {
+		c.Fatalf("Expected not to contact docker.io, got %s", out)
+	}
+	expected := fmt.Sprintf("Pulling from %s", repo)
+	if !strings.Contains(out, expected) {
+		c.Fatalf("Wanted %s, got %s", expected, out)
+	}
+
+	out, err = s.d.Cmd("images")
+	c.Assert(err, check.IsNil, check.Commentf(out))
+	// docker images shows correct registry prefixed image
+	if !strings.Contains(out, repo) {
+		c.Fatalf("Wanted %s in output, got %s", repo, out)
+	}
 }

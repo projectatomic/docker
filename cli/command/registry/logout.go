@@ -51,6 +51,10 @@ func runLogout(dockerCli *command.DockerCli, serverAddress string) error {
 		// saved the registry in one of the following format.
 		regsToTry = append(regsToTry, hostnameAddress, "http://"+hostnameAddress, "https://"+hostnameAddress)
 	}
+	// just for docker.io
+	if serverAddress == registry.IndexName {
+		serverAddress = registry.IndexServer
+	}
 
 	// check if we're logged in based on the records in the config file
 	// which means it couldn't have user/pass cause they may be in the creds store

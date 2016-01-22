@@ -3,6 +3,7 @@ package daemon
 import (
 	"encoding/json"
 	"fmt"
+	"path"
 	"sort"
 	"time"
 
@@ -14,6 +15,8 @@ import (
 	"github.com/docker/docker/container"
 	"github.com/docker/docker/image"
 	"github.com/docker/docker/layer"
+	refutils "github.com/docker/docker/reference"
+	"github.com/docker/docker/registry"
 )
 
 var acceptedImageFilterTags = map[string]bool{
@@ -35,6 +38,53 @@ func (r byCreated) Less(i, j int) bool { return r[i].Created < r[j].Created }
 // Map returns a map of all images in the ImageStore
 func (daemon *Daemon) Map() map[image.ID]*image.Image {
 	return daemon.imageStore.Map()
+}
+
+func matchReference(filter string, ref reference.Named) bool {
+	if filter == "" {
+		return true
+	}
+
+	var filterTagged bool
+	filterRef, err := reference.ParseNormalizedNamed(filter)
+	if err == nil { // parse error means wildcard repo
+		if _, ok := filterRef.(reference.NamedTagged); ok {
+			filterTagged = true
+		}
+	}
+
+	refBelongsToDefaultRegistry := false
+	indexName, remoteNameStr := reference.SplitHostname(ref)
+	for _, reg := range registry.DefaultRegistries {
+		if indexName == reg || indexName == "" {
+			refBelongsToDefaultRegistry = true
+			break
+		}
+	}
+
+	// If the repository belongs to default registry, match against fully
+	// qualified and unqualified name.
+	references := []reference.Named{ref}
+	if refutils.IsReferenceFullyQualified(ref) && refBelongsToDefaultRegistry {
+		newRef, err := refutils.SubstituteReferenceName(ref, remoteNameStr)
+		if err == nil {
+			references = append(references, newRef)
+		}
+	}
+
+	for _, ref := range references {
+		if filterTagged {
+			// filter by tag, require full ref match
+			if ref.String() == filter {
+				return true
+			}
+		} else if matched, err := path.Match(filter, ref.Name()); matched && err == nil {
+			// name only match, FIXME: docs say exact
+			return true
+		}
+	}
+
+	return false
 }
 
 // Images returns a filtered list of images. filterArgs is a JSON-encoded set
@@ -131,14 +181,20 @@ func (daemon *Daemon) Images(imageFilters filters.Args, all bool, withExtraAttrs
 		newImage := newImage(img, size)
 
 		for _, ref := range daemon.referenceStore.References(id.Digest()) {
+			var found bool
 			if imageFilters.Include("reference") {
-				var found bool
-				var matchErr error
 				for _, pattern := range imageFilters.Get("reference") {
-					found, matchErr = reference.FamiliarMatch(pattern, ref)
-					if matchErr != nil {
-						return nil, matchErr
+					//<<<<<<< HEAD
+					//found, matchErr = reference.FamiliarMatch(pattern, ref)
+					//if matchErr != nil {
+					//return nil, matchErr
+					//=======
+					if !matchReference(pattern, ref) {
+						found = false
+						continue
+						//>>>>>>> 8e97ef6... Add --add-registry and --block-registry options to docker daemon
 					}
+					found = true
 				}
 				if !found {
 					continue

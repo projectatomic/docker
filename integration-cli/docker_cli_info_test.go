@@ -237,3 +237,30 @@ func (s *DockerDaemonSuite) TestInfoLabels(c *check.C) {
 	c.Assert(err, checker.IsNil)
 	c.Assert(out, checker.Contains, "WARNING: labels with duplicate keys and conflicting values have been deprecated")
 }
+
+func (s *DockerSuite) TestInfoRegistries(c *check.C) {
+	out, _ := dockerCmd(c, "info")
+	c.Assert(out, checker.Contains, "docker.io (secure)")
+}
+
+func (s *DockerRegistrySuite) TestInfoRegistriesAdditional(c *check.C) {
+	d := daemon.New(c, dockerBinary, dockerdBinary, daemon.Config{
+		Experimental: testEnv.ExperimentalDaemon(),
+	})
+
+	d.StartWithBusybox(c, "--add-registry="+s.reg.URL(), "--block-registry=public")
+	out, _ := d.Cmd("info")
+	c.Assert(out, checker.Contains, s.reg.URL()+" (insecure)")
+	c.Assert(out, checker.Not(checker.Contains), "docker.io (secure)")
+
+	d.Restart(c, "--add-registry="+s.reg.URL(), "--block-registry=all")
+	out, _ = d.Cmd("info")
+	c.Assert(out, checker.Contains, s.reg.URL()+" (insecure)")
+	c.Assert(out, checker.Not(checker.Contains), "docker.io (secure)")
+
+	d.Restart(c, "--add-registry="+s.reg.URL())
+	out, _ = d.Cmd("info")
+	c.Assert(out, checker.Contains, fmt.Sprintf("%s (insecure), docker.io (secure)", s.reg.URL()))
+
+	d.Stop(c)
+}

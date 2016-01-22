@@ -20,7 +20,7 @@ func (s *DockerSwarmSuite) TestServiceHealthRun(c *check.C) {
 	d := s.AddDaemon(c, true, true)
 
 	// build image with health-check
-	// note: use `daemon.buildImageWithOut` to build, do not use `buildImage` to build
+	// note: use `daemon.BuildImageWithOut` to build, do not use `buildImage` to build
 	imageName := "testhealth"
 	_, _, err := d.BuildImageWithOut(imageName,
 		`FROM busybox

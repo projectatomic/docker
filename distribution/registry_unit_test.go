@@ -47,6 +47,10 @@ func testTokenPassThru(t *testing.T, ts *httptest.Server) {
 		t.Fatal(err)
 	}
 	defer os.RemoveAll(tmp)
+	authConfigs := make(map[string]types.AuthConfig)
+	authConfigs[ts.URL] = types.AuthConfig{
+		RegistryToken: secretRegistryToken,
+	}
 
 	uri, err := url.Parse(ts.URL)
 	if err != nil {
@@ -75,9 +79,7 @@ func testTokenPassThru(t *testing.T, ts *httptest.Server) {
 	imagePullConfig := &ImagePullConfig{
 		Config: Config{
 			MetaHeaders: http.Header{},
-			AuthConfig: &types.AuthConfig{
-				RegistryToken: secretRegistryToken,
-			},
+			AuthConfigs: authConfigs,
 		},
 		Schema2Types: ImageTypes,
 	}
@@ -87,7 +89,8 @@ func testTokenPassThru(t *testing.T, ts *httptest.Server) {
 	}
 	p := puller.(*v2Puller)
 	ctx := context.Background()
-	p.repo, _, err = NewV2Repository(ctx, p.repoInfo, p.endpoint, p.config.MetaHeaders, p.config.AuthConfig, "pull")
+	ac := p.config.AuthConfigs[ts.URL]
+	p.repo, _, err = NewV2Repository(ctx, p.repoInfo, p.endpoint, p.config.MetaHeaders, &ac, "pull")
 	if err != nil {
 		t.Fatal(err)
 	}

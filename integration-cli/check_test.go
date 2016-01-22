@@ -24,6 +24,10 @@ const (
 	// the private registry to use for tests
 	privateRegistryURL = "127.0.0.1:5000"
 
+	// the private registry to use for tests
+	privateRegistryURL2 = "127.0.0.1:5001"
+	privateRegistryURL3 = "127.0.0.1:5002"
+
 	// path to containerd's ctr binary
 	ctrBinary = "docker-containerd-ctr"
 
@@ -457,4 +461,45 @@ func (s *DockerTrustedSwarmSuite) TearDownTest(c *check.C) {
 
 func (s *DockerTrustedSwarmSuite) OnTimeout(c *check.C) {
 	s.swarmSuite.OnTimeout(c)
+}
+
+type DockerRegistriesSuite struct {
+	ds          *DockerSuite
+	reg1        *registry.V2
+	reg2        *registry.V2
+	regWithAuth *registry.V2
+	d           *daemon.Daemon
+}
+
+func (s *DockerRegistriesSuite) SetUpTest(c *check.C) {
+	s.reg1 = setupRegistryAt(c, privateRegistryURL, false, "", "")
+	s.reg2 = setupRegistryAt(c, privateRegistryURL2, false, "", "")
+	s.regWithAuth = setupRegistryAt(c, privateRegistryURL3, false, "htpasswd", "")
+	s.d = daemon.New(c, dockerBinary, dockerdBinary, daemon.Config{
+		Experimental: testEnv.ExperimentalDaemon(),
+	})
+}
+
+func (s *DockerRegistriesSuite) TearDownTest(c *check.C) {
+	if s.reg1 != nil {
+		s.reg1.Close()
+	}
+	if s.reg2 != nil {
+		s.reg2.Close()
+	}
+	if s.regWithAuth != nil {
+		out, err := s.d.Cmd("logout", s.regWithAuth.URL())
+		c.Assert(err, check.IsNil, check.Commentf(out))
+		s.regWithAuth.Close()
+	}
+	if s.d != nil {
+		s.d.Stop(c)
+	}
+	s.ds.TearDownTest(c)
+}
+
+func init() {
+	check.Suite(&DockerRegistriesSuite{
+		ds: &DockerSuite{},
+	})
 }

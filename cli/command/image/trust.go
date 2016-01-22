@@ -29,14 +29,15 @@ type target struct {
 }
 
 // trustedPush handles content trust pushing of an image
-func trustedPush(ctx context.Context, cli *command.DockerCli, repoInfo *registry.RepositoryInfo, ref reference.Named, authConfig types.AuthConfig, requestPrivilege types.RequestPrivilegeFunc) error {
-	responseBody, err := imagePushPrivileged(ctx, cli, authConfig, ref, requestPrivilege)
+func trustedPush(ctx context.Context, cli *command.DockerCli, repoInfo *registry.RepositoryInfo, ref reference.Named, requestPrivilege types.RequestPrivilegeFunc) error {
+	responseBody, err := imagePushPrivileged(ctx, cli, ref, requestPrivilege)
 	if err != nil {
 		return err
 	}
 
 	defer responseBody.Close()
 
+	authConfig := command.ResolveAuthConfig(ctx, cli, repoInfo.Index)
 	return PushTrustedReference(cli, repoInfo, ref, authConfig, responseBody)
 }
 
@@ -202,8 +203,8 @@ func addTargetToAllSignableRoles(repo *client.NotaryRepository, target *client.T
 }
 
 // imagePushPrivileged push the image
-func imagePushPrivileged(ctx context.Context, cli *command.DockerCli, authConfig types.AuthConfig, ref reference.Named, requestPrivilege types.RequestPrivilegeFunc) (io.ReadCloser, error) {
-	encodedAuth, err := command.EncodeAuthToBase64(authConfig)
+func imagePushPrivileged(ctx context.Context, cli *command.DockerCli, ref reference.Named, requestPrivilege types.RequestPrivilegeFunc) (io.ReadCloser, error) {
+	encodedAuth, err := command.GetEncodedAuth(cli, ref)
 	if err != nil {
 		return nil, err
 	}
@@ -216,9 +217,10 @@ func imagePushPrivileged(ctx context.Context, cli *command.DockerCli, authConfig
 }
 
 // trustedPull handles content trust pulling of an image
-func trustedPull(ctx context.Context, cli *command.DockerCli, repoInfo *registry.RepositoryInfo, ref reference.Named, authConfig types.AuthConfig, requestPrivilege types.RequestPrivilegeFunc) error {
+func trustedPull(ctx context.Context, cli *command.DockerCli, repoInfo *registry.RepositoryInfo, ref reference.Named, requestPrivilege types.RequestPrivilegeFunc) error {
 	var refs []target
 
+	authConfig := command.ResolveAuthConfig(ctx, cli, repoInfo.Index)
 	notaryRepo, err := trust.GetNotaryRepository(cli, repoInfo, authConfig, "pull")
 	if err != nil {
 		fmt.Fprintf(cli.Out(), "Error establishing connection to trust repository: %s\n", err)
@@ -278,7 +280,7 @@ func trustedPull(ctx context.Context, cli *command.DockerCli, repoInfo *registry
 		if err != nil {
 			return err
 		}
-		if err := imagePullPrivileged(ctx, cli, authConfig, reference.FamiliarString(trustedRef), requestPrivilege, false); err != nil {
+		if err := imagePullPrivileged(ctx, cli, ref, requestPrivilege, false); err != nil {
 			return err
 		}
 
@@ -295,9 +297,8 @@ func trustedPull(ctx context.Context, cli *command.DockerCli, repoInfo *registry
 }
 
 // imagePullPrivileged pulls the image and displays it to the output
-func imagePullPrivileged(ctx context.Context, cli *command.DockerCli, authConfig types.AuthConfig, ref string, requestPrivilege types.RequestPrivilegeFunc, all bool) error {
-
-	encodedAuth, err := command.EncodeAuthToBase64(authConfig)
+func imagePullPrivileged(ctx context.Context, cli *command.DockerCli, ref reference.Named, requestPrivilege types.RequestPrivilegeFunc, all bool) error {
+	encodedAuth, err := command.GetEncodedAuth(cli, ref)
 	if err != nil {
 		return err
 	}
@@ -307,7 +308,7 @@ func imagePullPrivileged(ctx context.Context, cli *command.DockerCli, authConfig
 		All:           all,
 	}
 
-	responseBody, err := cli.Client().ImagePull(ctx, ref, options)
+	responseBody, err := cli.Client().ImagePull(ctx, reference.FamiliarString(ref), options)
 	if err != nil {
 		return err
 	}

@@ -5,11 +5,13 @@ import (
 	"compress/gzip"
 	"fmt"
 	"io"
+	"strings"
 
 	"github.com/Sirupsen/logrus"
 	"github.com/docker/distribution/reference"
 	"github.com/docker/docker/distribution/metadata"
 	"github.com/docker/docker/pkg/progress"
+	refutils "github.com/docker/docker/reference"
 	"github.com/docker/docker/registry"
 	"golang.org/x/net/context"
 )
@@ -64,6 +66,20 @@ func Push(ctx context.Context, ref reference.Named, imagePushConfig *ImagePushCo
 		return err
 	}
 
+	// If we're not using a custom registry, we know the restrictions
+	// applied to repository names and can warn the user in advance.
+	// Custom repositories can have different rules, and we must also
+	// allow pushing by image ID.
+	if repoInfo.Official {
+		authConfig := registry.ResolveAuthConfig(imagePushConfig.AuthConfigs, repoInfo.Index)
+		username := authConfig.Username
+		if username == "" {
+			username = "<user>"
+		}
+		name := strings.TrimPrefix(refutils.RemoteName(repoInfo.Name), refutils.DefaultRepoPrefix)
+		return fmt.Errorf("You cannot push a \"root\" repository. Please rename your repository to %s/<user>/<repo> (ex: %s/%s/%s)", registry.IndexName, registry.IndexName, username, name)
+	}
+
 	endpoints, err := imagePushConfig.RegistryService.LookupPushEndpoints(reference.Domain(repoInfo.Name))
 	if err != nil {
 		return err
@@ -71,7 +87,7 @@ func Push(ctx context.Context, ref reference.Named, imagePushConfig *ImagePushCo
 
 	progress.Messagef(imagePushConfig.ProgressOutput, "", "The push refers to a repository [%s]", repoInfo.Name.Name())
 
-	associations := imagePushConfig.ReferenceStore.ReferencesByName(repoInfo.Name)
+	associations := imagePushConfig.ReferenceStore.ReferencesByName(ref)
 	if len(associations) == 0 {
 		return fmt.Errorf("An image does not exist locally with the tag: %s", reference.FamiliarName(repoInfo.Name))
 	}

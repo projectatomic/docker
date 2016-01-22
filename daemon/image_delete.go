@@ -11,6 +11,7 @@ import (
 	"github.com/docker/docker/container"
 	"github.com/docker/docker/image"
 	"github.com/docker/docker/pkg/stringid"
+	refutils "github.com/docker/docker/reference"
 )
 
 type conflictType int
@@ -112,7 +113,8 @@ func (daemon *Daemon) ImageDelete(imageRef string, force, prune bool) ([]types.I
 		if _, isCanonical := parsedRef.(reference.Canonical); !isCanonical {
 			foundRepoTagRef := false
 			for _, repoRef := range repoRefs {
-				if _, repoRefIsCanonical := repoRef.(reference.Canonical); !repoRefIsCanonical && parsedRef.Name() == repoRef.Name() {
+				//if _, repoRefIsCanonical := repoRef.(reference.Canonical); !repoRefIsCanonical && parsedRef.Name() == repoRef.Name() {
+				if _, repoRefIsCanonical := repoRef.(reference.Canonical); !repoRefIsCanonical && reference.FamiliarName(parsedRef) == reference.FamiliarName(repoRef) {
 					foundRepoTagRef = true
 					break
 				}
@@ -121,7 +123,25 @@ func (daemon *Daemon) ImageDelete(imageRef string, force, prune bool) ([]types.I
 				// Remove canonical references from same repository
 				remainingRefs := []reference.Named{}
 				for _, repoRef := range repoRefs {
-					if _, repoRefIsCanonical := repoRef.(reference.Canonical); repoRefIsCanonical && parsedRef.Name() == repoRef.Name() {
+					r := parsedRef
+					if !refutils.IsReferenceFullyQualified(r) {
+						index, _, err := refutils.SplitReposName(repoRef)
+						if err != nil {
+							return nil, err
+						}
+						// this happens when someone pulls an image
+						// with upstream docker but removes it with RH docker.
+						// or when we get a tagged image which doesn't really
+						// have an index.
+						if index != "" {
+							r, err = refutils.QualifyUnqualifiedReference(r, index)
+							if err != nil {
+								return nil, err
+							}
+						}
+					}
+					//if _, repoRefIsCanonical := repoRef.(reference.Canonical); repoRefIsCanonical && r.Name() == repoRef.Name() {
+					if _, repoRefIsCanonical := repoRef.(reference.Canonical); repoRefIsCanonical && reference.FamiliarName(r) == reference.FamiliarName(repoRef) {
 						if _, err := daemon.removeImageRef(repoRef); err != nil {
 							return records, err
 						}

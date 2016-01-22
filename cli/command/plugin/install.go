@@ -11,6 +11,7 @@ import (
 	"github.com/docker/docker/cli/command"
 	"github.com/docker/docker/cli/command/image"
 	"github.com/docker/docker/pkg/jsonmessage"
+	refutils "github.com/docker/docker/reference"
 	"github.com/docker/docker/registry"
 	"github.com/spf13/cobra"
 	"github.com/spf13/pflag"
@@ -103,13 +104,12 @@ func buildPullConfig(ctx context.Context, dockerCli *command.DockerCli, opts plu
 		remote = reference.FamiliarString(trusted)
 	}
 
-	authConfig := command.ResolveAuthConfig(ctx, dockerCli, repoInfo.Index)
-
-	encodedAuth, err := command.EncodeAuthToBase64(authConfig)
+	encodedAuth, err := command.GetEncodedAuth(dockerCli, ref)
 	if err != nil {
 		return types.PluginInstallOptions{}, err
 	}
-	registryAuthFunc := command.RegistryAuthenticationPrivilegedFunc(dockerCli, repoInfo.Index, cmdName)
+
+	registryAuthFunc := command.RegistryAuthenticationPrivilegedFunc(dockerCli, repoInfo.Index, cmdName, refutils.IsReferenceFullyQualified(ref))
 
 	options := types.PluginInstallOptions{
 		RegistryAuth:          encodedAuth,

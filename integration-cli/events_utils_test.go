@@ -170,15 +170,17 @@ func matchIDAndEventType(matches map[string]string, id, eventType string) bool {
 }
 
 func matchEventID(matches map[string]string, id string) bool {
-	matchID := matches["id"] == id || strings.HasPrefix(matches["id"], id)
+	cleanMatchID := strings.TrimPrefix(matches["id"], "docker.io/")
+	matchID := cleanMatchID == id || strings.HasPrefix(cleanMatchID, id)
 	if !matchID && matches["attributes"] != "" {
 		// try matching a name in the attributes
 		attributes := map[string]string{}
 		for _, a := range strings.Split(matches["attributes"], ", ") {
-			kv := strings.Split(a, "=")
+			attr := strings.TrimPrefix(a, "docker.io/")
+			kv := strings.Split(attr, "=")
 			attributes[kv[0]] = kv[1]
 		}
-		matchID = attributes["name"] == id
+		matchID = strings.TrimPrefix(attributes["name"], "docker.io/") == id
 	}
 	return matchID
 }

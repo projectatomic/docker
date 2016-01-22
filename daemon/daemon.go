@@ -638,7 +638,7 @@ func NewDaemon(config *config.Config, registryService registry.Service, containe
 
 	eventsService := events.New()
 
-	referenceStore, err := refstore.NewReferenceStore(filepath.Join(imageRoot, "repositories.json"))
+	referenceStore, err := refstore.NewReferenceStore(filepath.Join(imageRoot, "repositories.json"), registry.DefaultRegistries...)
 	if err != nil {
 		return nil, fmt.Errorf("Couldn't create Tag store repositories: %s", err)
 	}

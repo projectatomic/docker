@@ -363,3 +363,56 @@ func (s *DockerSuite) TestImagesFormatDefaultFormat(c *check.C) {
 	out, _ = dockerCmd(c, "--config", d, "images", "-q", "myimage")
 	c.Assert(out, checker.Equals, imageID+"\n", check.Commentf("Expected to print only the image id, got %v\n", out))
 }
+
+func (s *DockerDaemonSuite) doTestImagesWithAdditionalRegistry(c *check.C, publicBlocked bool) {
+	daemonArgs := []string{"--add-registry=example.com"}
+	if publicBlocked {
+		daemonArgs = append(daemonArgs, "--block-registry=public")
+	}
+	s.d.StartWithBusybox(c, daemonArgs...)
+
+	if out, err := s.d.Cmd("tag", "busybox", "example.com/busybox"); err != nil {
+		c.Fatalf("failed to tag image %s: error %v, output %q", "busybox", err, out)
+	}
+	if out, err := s.d.Cmd("tag", "busybox", "docker.io/busybox"); err != nil {
+		c.Fatalf("failed to tag image %s: error %v, output %q", "busybox", err, out)
+	}
+	if out, err := s.d.Cmd("tag", "busybox", "other.com/busybox"); err != nil {
+		c.Fatalf("failed to tag image %s: error %v, output %q", "busybox", err, out)
+	}
+
+	expected := []string{"busybox:latest", "example.com/busybox:latest"}
+	if !publicBlocked {
+		expected = append(expected, "docker.io/busybox:latest")
+	}
+	images := s.d.GetImages(c, "*box")
+	if len(images) != len(expected) {
+		c.Errorf("got     : %v", images)
+		c.Errorf("expected: %v", expected)
+		c.Fatalf("got unexpected number of images (%d), expected: %d, images: %v", len(images), len(expected), images)
+	}
+	for _, exp := range expected {
+		if _, ok := images[exp]; !ok {
+			c.Errorf("expected image name %s, not found among images: %v", exp, images)
+		}
+	}
+
+	expected = []string{"docker.io/busybox:latest", "example.com/busybox:latest", "other.com/busybox:latest"}
+	images = s.d.GetImages(c, "*/*box")
+	if len(images) != len(expected) {
+		c.Fatalf("got unexpected number of images (%d), expected: %d, images: %v", len(images), len(expected), images)
+	}
+	for _, exp := range expected {
+		if _, ok := images[exp]; !ok {
+			c.Errorf("expected image name %s, not found among images: %v", exp, images)
+		}
+	}
+}
+
+func (s *DockerDaemonSuite) TestImagesWithAdditionalRegistry(c *check.C) {
+	s.doTestImagesWithAdditionalRegistry(c, false)
+}
+
+func (s *DockerDaemonSuite) TestImagesWithPublicRegistryBlocked(c *check.C) {
+	s.doTestImagesWithAdditionalRegistry(c, true)
+}

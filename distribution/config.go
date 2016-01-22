@@ -28,7 +28,7 @@ type Config struct {
 	MetaHeaders map[string][]string
 	// AuthConfig holds authentication credentials for authenticating with
 	// the registry.
-	AuthConfig *types.AuthConfig
+	AuthConfigs map[string]types.AuthConfig
 	// ProgressOutput is the interface for showing the status of the pull
 	// operation.
 	ProgressOutput progress.Output

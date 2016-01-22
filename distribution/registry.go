@@ -14,6 +14,7 @@ import (
 	"github.com/docker/distribution/registry/client/transport"
 	"github.com/docker/docker/api/types"
 	"github.com/docker/docker/dockerversion"
+	refutils "github.com/docker/docker/reference"
 	"github.com/docker/docker/registry"
 	"github.com/docker/go-connections/sockets"
 	"golang.org/x/net/context"
@@ -58,7 +59,7 @@ func NewV2Repository(ctx context.Context, repoInfo *registry.RepositoryInfo, end
 	repoName := repoInfo.Name.Name()
 	// If endpoint does not support CanonicalName, use the RemoteName instead
 	if endpoint.TrimHostname {
-		repoName = reference.Path(repoInfo.Name)
+		repoName = refutils.RemoteName(repoInfo.Name)
 	}
 
 	direct := &net.Dialer{

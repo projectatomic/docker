@@ -173,18 +173,20 @@ func deleteAllImages(c *check.C) {
 			continue
 		}
 		fields := strings.Fields(l)
-		imgTag := fields[0] + ":" + fields[1]
-		if _, ok := protectedImages[imgTag]; !ok {
-			if fields[0] == "<none>" || fields[1] == "<none>" {
-				if fields[2] != "<none>" {
-					imgMap[fields[0]+"@"+fields[2]] = struct{}{}
-				} else {
-					imgMap[fields[3]] = struct{}{}
-				}
-				// continue
+		imgRef := fields[0] + ":" + fields[1]
+		if fields[1] == "<none>" {
+			if fields[2] != "<none>" {
+				imgRef = fields[0] + "@" + fields[2]
 			} else {
-				imgMap[imgTag] = struct{}{}
+				imgRef = fields[0]
 			}
+		}
+		if _, ok := protectedImages[imgRef]; !ok {
+			if fields[0] == "<none>" {
+				imgMap[fields[3]] = struct{}{}
+				continue
+			}
+			imgMap[imgRef] = struct{}{}
 		}
 	}
 	if len(imgMap) != 0 {
@@ -900,8 +902,8 @@ func parseEventTime(t time.Time) string {
 	return fmt.Sprintf("%d.%09d", t.Unix(), int64(t.Nanosecond()))
 }
 
-func setupRegistry(c *check.C, schema1 bool, auth, tokenURL string) *registry.V2 {
-	reg, err := registry.NewV2(schema1, auth, tokenURL, privateRegistryURL)
+func setupRegistryAt(c *check.C, url string, schema1 bool, auth, tokenURL string) *registry.V2 {
+	reg, err := registry.NewV2(schema1, auth, tokenURL, url)
 	c.Assert(err, check.IsNil)
 
 	// Wait for registry to be ready to serve requests.
@@ -914,6 +916,10 @@ func setupRegistry(c *check.C, schema1 bool, auth, tokenURL string) *registry.V2
 
 	c.Assert(err, check.IsNil, check.Commentf("Timeout waiting for test registry to become available: %v", err))
 	return reg
+}
+
+func setupRegistry(c *check.C, schema1 bool, auth, tokenURL string) *registry.V2 {
+	return setupRegistryAt(c, privateRegistryURL, schema1, auth, tokenURL)
 }
 
 func setupNotary(c *check.C) *testNotary {

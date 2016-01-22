@@ -321,6 +321,18 @@ func prettyPrintInfo(dockerCli *command.DockerCli, info types.Info) error {
 
 	fmt.Fprintf(dockerCli.Out(), "Live Restore Enabled: %v\n", info.LiveRestoreEnabled)
 
+	fmt.Fprintf(dockerCli.Out(), "Registries: ")
+	regs := []string{}
+	for _, r := range info.Registries {
+		s := "secure"
+		if !r.Secure {
+			s = "insecure"
+		}
+		regs = append(regs, fmt.Sprintf("%s (%s)", r.Name, s))
+	}
+	fmt.Fprintf(dockerCli.Out(), "%s", strings.Join(regs, ", "))
+	fmt.Fprintf(dockerCli.Out(), "\n")
+
 	return nil
 }
 

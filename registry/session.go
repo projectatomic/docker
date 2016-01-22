@@ -27,6 +27,7 @@ import (
 	"github.com/docker/docker/pkg/ioutils"
 	"github.com/docker/docker/pkg/stringid"
 	"github.com/docker/docker/pkg/tarsum"
+	refutils "github.com/docker/docker/reference"
 )
 
 var (
@@ -202,6 +203,10 @@ func newSession(client *http.Client, authConfig *types.AuthConfig, endpoint *V1E
 // NewSession creates a new session
 // TODO(tiborvass): remove authConfig param once registry client v2 is vendored
 func NewSession(client *http.Client, authConfig *types.AuthConfig, endpoint *V1Endpoint) (*Session, error) {
+	if endpoint != nil && isEndpointURLBlocked(endpoint.URL.String()) {
+		return nil, fmt.Errorf("Index %q is blocked.", endpoint.URL.String())
+	}
+
 	if err := authorizeClient(client, authConfig, endpoint); err != nil {
 		return nil, err
 	}
@@ -319,19 +324,50 @@ func (r *Session) GetRemoteImageLayer(imgID, registry string, imgSize int64) (io
 	return res.Body, nil
 }
 
+func isEndpointURLBlocked(endpoint string) bool {
+	if parsedURL, err := url.Parse(endpoint); err == nil {
+		if !IsIndexBlocked(parsedURL.Host) {
+			return false
+		}
+	} else {
+		logrus.Debug(err)
+	}
+	return true
+}
+
+func isEndpointBlocked(endpoint APIEndpoint) bool {
+	return isEndpointURLBlocked(endpoint.URL.String())
+}
+
+func filterBlockedEndpoints(endpoints []APIEndpoint) []APIEndpoint {
+	res := []APIEndpoint{}
+	for _, endpoint := range endpoints {
+		if !isEndpointBlocked(endpoint) {
+			res = append(res, endpoint)
+		} else {
+			logrus.Infof("Skipping blocked endpoint %q", endpoint.URL)
+		}
+	}
+	return res
+}
+
 // GetRemoteTag retrieves the tag named in the askedTag argument from the given
 // repository. It queries each of the registries supplied in the registries
 // argument, and returns data from the first one that answers the query
 // successfully.
 func (r *Session) GetRemoteTag(registries []string, repositoryRef reference.Named, askedTag string) (string, error) {
-	repository := reference.Path(repositoryRef)
+	repository := refutils.RemoteName(repositoryRef)
 
-	if strings.Count(repository, "/") == 0 {
-		// This will be removed once the registry supports auto-resolution on
-		// the "library" namespace
-		repository = "library/" + repository
-	}
 	for _, host := range registries {
+		if host == IndexServer && strings.Count(repository, "/") == 0 {
+			// This will be removed once the registry supports auto-resolution on
+			// the "library" namespace
+			repository = refutils.DefaultRepoPrefix + repository
+		}
+		if isEndpointURLBlocked(host) {
+			logrus.Errorf("Cannot query blocked registry at %s for remote tags.", host)
+			continue
+		}
 		endpoint := fmt.Sprintf("%srepositories/%s/tags/%s", host, repository, askedTag)
 		res, err := r.client.Get(endpoint)
 		if err != nil {
@@ -362,14 +398,18 @@ func (r *Session) GetRemoteTag(registries []string, repositoryRef reference.Name
 // the first one that answers the query successfully. It returns a map with
 // tag names as the keys and image IDs as the values.
 func (r *Session) GetRemoteTags(registries []string, repositoryRef reference.Named) (map[string]string, error) {
-	repository := reference.Path(repositoryRef)
+	repository := refutils.RemoteName(repositoryRef)
 
-	if strings.Count(repository, "/") == 0 {
-		// This will be removed once the registry supports auto-resolution on
-		// the "library" namespace
-		repository = "library/" + repository
-	}
 	for _, host := range registries {
+		if host == IndexServer && strings.Count(repository, "/") == 0 {
+			// This will be removed once the registry supports auto-resolution on
+			// the "library" namespace
+			repository = refutils.DefaultRepoPrefix + repository
+		}
+		if isEndpointURLBlocked(host) {
+			logrus.Errorf("Cannot query blocked registry at %s for remote tags.", host)
+			continue
+		}
 		endpoint := fmt.Sprintf("%srepositories/%s/tags", host, repository)
 		res, err := r.client.Get(endpoint)
 		if err != nil {
@@ -416,7 +456,7 @@ func buildEndpointsList(headers []string, indexEp string) ([]string, error) {
 
 // GetRepositoryData returns lists of images and endpoints for the repository
 func (r *Session) GetRepositoryData(name reference.Named) (*RepositoryData, error) {
-	repositoryTarget := fmt.Sprintf("%srepositories/%s/images", r.indexEndpoint.String(), reference.Path(name))
+	repositoryTarget := fmt.Sprintf("%srepositories/%s/images", r.indexEndpoint.String(), refutils.RemoteName(name))
 
 	logrus.Debugf("[registry] Calling GET %s", repositoryTarget)
 
@@ -450,7 +490,7 @@ func (r *Session) GetRepositoryData(name reference.Named) (*RepositoryData, erro
 		if err != nil {
 			logrus.Debugf("Error reading response body: %s", err)
 		}
-		return nil, httputils.NewHTTPRequestError(fmt.Sprintf("Error: Status %d trying to pull repository %s: %q", res.StatusCode, reference.Path(name), errBody), res)
+		return nil, httputils.NewHTTPRequestError(fmt.Sprintf("Error: Status %d trying to pull repository %s: %q", res.StatusCode, refutils.RemoteName(name), errBody), res)
 	}
 
 	var endpoints []string
@@ -605,7 +645,7 @@ func (r *Session) PushImageLayerRegistry(imgID string, layer io.Reader, registry
 func (r *Session) PushRegistryTag(remote reference.Named, revision, tag, registry string) error {
 	// "jsonify" the string
 	revision = "\"" + revision + "\""
-	path := fmt.Sprintf("repositories/%s/tags/%s", reference.Path(remote), tag)
+	path := fmt.Sprintf("repositories/%s/tags/%s", refutils.RemoteName(remote), tag)
 
 	req, err := http.NewRequest("PUT", registry+path, strings.NewReader(revision))
 	if err != nil {
@@ -619,7 +659,7 @@ func (r *Session) PushRegistryTag(remote reference.Named, revision, tag, registr
 	}
 	res.Body.Close()
 	if res.StatusCode != 200 && res.StatusCode != 201 {
-		return httputils.NewHTTPRequestError(fmt.Sprintf("Internal server error: %d trying to push tag %s on %s", res.StatusCode, tag, reference.Path(remote)), res)
+		return httputils.NewHTTPRequestError(fmt.Sprintf("Internal server error: %d trying to push tag %s on %s", res.StatusCode, tag, refutils.RemoteName(remote)), res)
 	}
 	return nil
 }
@@ -645,7 +685,7 @@ func (r *Session) PushImageJSONIndex(remote reference.Named, imgList []*ImgData,
 	if validate {
 		suffix = "images"
 	}
-	u := fmt.Sprintf("%srepositories/%s/%s", r.indexEndpoint.String(), reference.Path(remote), suffix)
+	u := fmt.Sprintf("%srepositories/%s/%s", r.indexEndpoint.String(), refutils.RemoteName(remote), suffix)
 	logrus.Debugf("[registry] PUT %s", u)
 	logrus.Debugf("Image list pushed to index:\n%s", imgListJSON)
 	headers := map[string][]string{
@@ -683,7 +723,7 @@ func (r *Session) PushImageJSONIndex(remote reference.Named, imgList []*ImgData,
 			if err != nil {
 				logrus.Debugf("Error reading response body: %s", err)
 			}
-			return nil, httputils.NewHTTPRequestError(fmt.Sprintf("Error: Status %d trying to push repository %s: %q", res.StatusCode, reference.Path(remote), errBody), res)
+			return nil, httputils.NewHTTPRequestError(fmt.Sprintf("Error: Status %d trying to push repository %s: %q", res.StatusCode, refutils.RemoteName(remote), errBody), res)
 		}
 		tokens = res.Header["X-Docker-Token"]
 		logrus.Debugf("Auth token: %v", tokens)
@@ -701,7 +741,7 @@ func (r *Session) PushImageJSONIndex(remote reference.Named, imgList []*ImgData,
 			if err != nil {
 				logrus.Debugf("Error reading response body: %s", err)
 			}
-			return nil, httputils.NewHTTPRequestError(fmt.Sprintf("Error: Status %d trying to push checksums %s: %q", res.StatusCode, reference.Path(remote), errBody), res)
+			return nil, httputils.NewHTTPRequestError(fmt.Sprintf("Error: Status %d trying to push checksums %s: %q", res.StatusCode, refutils.RemoteName(remote), errBody), res)
 		}
 	}
 

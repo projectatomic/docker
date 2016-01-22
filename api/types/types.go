@@ -123,6 +123,12 @@ type Commit struct {
 	Expected string // Expected is the commit ID of external tool expected by dockerd as set at build time.
 }
 
+// Registry holds information about a specific registry
+type Registry struct {
+	Name   string
+	Secure bool
+}
+
 // Info contains response of Engine API:
 // GET "/info"
 type Info struct {
@@ -160,6 +166,7 @@ type Info struct {
 	OSType             string
 	Architecture       string
 	IndexServerAddress string
+	IndexServerName    string
 	RegistryConfig     *registry.ServiceConfig
 	NCPU               int
 	MemTotal           int64
@@ -186,6 +193,7 @@ type Info struct {
 	RuncCommit         Commit
 	InitCommit         Commit
 	SecurityOptions    []string
+	Registries         []Registry
 }
 
 // KeyValue holds a key/value pair

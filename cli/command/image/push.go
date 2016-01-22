@@ -7,6 +7,7 @@ import (
 	"github.com/docker/docker/cli"
 	"github.com/docker/docker/cli/command"
 	"github.com/docker/docker/pkg/jsonmessage"
+	refutils "github.com/docker/docker/reference"
 	"github.com/docker/docker/registry"
 	"github.com/spf13/cobra"
 )
@@ -43,15 +44,13 @@ func runPush(dockerCli *command.DockerCli, remote string) error {
 
 	ctx := context.Background()
 
-	// Resolve the Auth config relevant for this server
-	authConfig := command.ResolveAuthConfig(ctx, dockerCli, repoInfo.Index)
-	requestPrivilege := command.RegistryAuthenticationPrivilegedFunc(dockerCli, repoInfo.Index, "push")
+	requestPrivilege := command.RegistryAuthenticationPrivilegedFunc(dockerCli, repoInfo.Index, "push", refutils.IsReferenceFullyQualified(ref))
 
 	if command.IsTrusted() {
-		return trustedPush(ctx, dockerCli, repoInfo, ref, authConfig, requestPrivilege)
+		return trustedPush(ctx, dockerCli, repoInfo, ref, requestPrivilege)
 	}
 
-	responseBody, err := imagePushPrivileged(ctx, dockerCli, authConfig, ref, requestPrivilege)
+	responseBody, err := imagePushPrivileged(ctx, dockerCli, ref, requestPrivilege)
 	if err != nil {
 		return err
 	}

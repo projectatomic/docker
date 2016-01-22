@@ -34,7 +34,7 @@ func ParseNormalizedNamed(s string) (Named, error) {
 	if ok := anchoredIdentifierRegexp.MatchString(s); ok {
 		return nil, fmt.Errorf("invalid repository name (%s), cannot specify 64-byte hexadecimal strings", s)
 	}
-	domain, remainder := splitDockerDomain(s)
+	domain, remainder, unqualified, noprefix := splitDockerDomain(s)
 	var remoteName string
 	if tagSep := strings.IndexRune(remainder, ':'); tagSep > -1 {
 		remoteName = remainder[:tagSep]
@@ -45,7 +45,7 @@ func ParseNormalizedNamed(s string) (Named, error) {
 		return nil, errors.New("invalid reference format: repository name must be lowercase")
 	}
 
-	ref, err := Parse(domain + "/" + remainder)
+	ref, err := Parse(domain+"/"+remainder, unqualified, noprefix)
 	if err != nil {
 		return nil, err
 	}
@@ -59,10 +59,11 @@ func ParseNormalizedNamed(s string) (Named, error) {
 // splitDockerDomain splits a repository name to domain and remotename string.
 // If no valid domain is found, the default domain is used. Repository name
 // needs to be already validated before.
-func splitDockerDomain(name string) (domain, remainder string) {
+func splitDockerDomain(name string) (domain, remainder string, unqualified, noprefix bool) {
 	i := strings.IndexRune(name, '/')
 	if i == -1 || (!strings.ContainsAny(name[:i], ".:") && name[:i] != "localhost") {
 		domain, remainder = defaultDomain, name
+		unqualified = true
 	} else {
 		domain, remainder = name[:i], name[i+1:]
 	}
@@ -71,6 +72,7 @@ func splitDockerDomain(name string) (domain, remainder string) {
 	}
 	if domain == defaultDomain && !strings.ContainsRune(remainder, '/') {
 		remainder = officialRepoName + "/" + remainder
+		noprefix = true
 	}
 	return
 }
@@ -88,7 +90,6 @@ func familiarizeName(named namedRepository) repository {
 	}
 
 	if repo.domain == defaultDomain {
-		repo.domain = ""
 		// Handle official repositories which have the pattern "library/<official repo name>"
 		if split := strings.Split(repo.path, "/"); len(split) == 2 && split[0] == officialRepoName {
 			repo.path = split[1]

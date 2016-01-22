@@ -32,6 +32,7 @@ import (
 	"github.com/docker/docker/pkg/progress"
 	"github.com/docker/docker/plugin/v2"
 	refstore "github.com/docker/docker/reference"
+	"github.com/docker/docker/registry"
 	"github.com/opencontainers/go-digest"
 	"github.com/pkg/errors"
 	"golang.org/x/net/context"
@@ -191,11 +192,21 @@ func (pm *Manager) Privileges(ctx context.Context, ref reference.Named, metaHead
 	// create image store instance
 	cs := &tempConfigStore{}
 
+	repoInfo, err := registry.ParseRepositoryInfo(ref)
+	if err != nil {
+		return nil, err
+	}
+	auths := make(map[string]types.AuthConfig)
+	authConfigKey := registry.GetAuthConfigKey(repoInfo.Index)
+	if authConfig != nil {
+		auths[authConfigKey] = *authConfig
+	}
+
 	// DownloadManager not defined because only pulling configuration.
 	pluginPullConfig := &distribution.ImagePullConfig{
 		Config: distribution.Config{
 			MetaHeaders:      metaHeader,
-			AuthConfig:       authConfig,
+			AuthConfigs:      auths,
 			RegistryService:  pm.config.RegistryService,
 			ImageEventLogger: func(string, string, string) {},
 			ImageStore:       cs,
@@ -249,11 +260,20 @@ func (pm *Manager) Upgrade(ctx context.Context, ref reference.Named, name string
 		tmpDir:    tmpRootFSDir,
 		blobStore: pm.blobStore,
 	}
+	repoInfo, err := registry.ParseRepositoryInfo(ref)
+	if err != nil {
+		return err
+	}
+	auths := make(map[string]types.AuthConfig)
+	authConfigKey := registry.GetAuthConfigKey(repoInfo.Index)
+	if authConfig != nil {
+		auths[authConfigKey] = *authConfig
+	}
 
 	pluginPullConfig := &distribution.ImagePullConfig{
 		Config: distribution.Config{
 			MetaHeaders:      metaHeader,
-			AuthConfig:       authConfig,
+			AuthConfigs:      auths,
 			RegistryService:  pm.config.RegistryService,
 			ImageEventLogger: pm.config.LogPluginEvent,
 			ImageStore:       dm,
@@ -302,10 +322,20 @@ func (pm *Manager) Pull(ctx context.Context, ref reference.Named, name string, m
 		blobStore: pm.blobStore,
 	}
 
+	repoInfo, err := registry.ParseRepositoryInfo(ref)
+	if err != nil {
+		return err
+	}
+	auths := make(map[string]types.AuthConfig)
+	authConfigKey := registry.GetAuthConfigKey(repoInfo.Index)
+	if authConfig != nil {
+		auths[authConfigKey] = *authConfig
+	}
+
 	pluginPullConfig := &distribution.ImagePullConfig{
 		Config: distribution.Config{
 			MetaHeaders:      metaHeader,
-			AuthConfig:       authConfig,
+			AuthConfigs:      auths,
 			RegistryService:  pm.config.RegistryService,
 			ImageEventLogger: pm.config.LogPluginEvent,
 			ImageStore:       dm,
@@ -424,10 +454,20 @@ func (pm *Manager) Push(ctx context.Context, name string, metaHeader http.Header
 
 	uploadManager := xfer.NewLayerUploadManager(3)
 
+	repoInfo, err := registry.ParseRepositoryInfo(ref)
+	if err != nil {
+		return err
+	}
+	auths := make(map[string]types.AuthConfig)
+	authConfigKey := registry.GetAuthConfigKey(repoInfo.Index)
+	if authConfig != nil {
+		auths[authConfigKey] = *authConfig
+	}
+
 	imagePushConfig := &distribution.ImagePushConfig{
 		Config: distribution.Config{
 			MetaHeaders:      metaHeader,
-			AuthConfig:       authConfig,
+			AuthConfigs:      auths,
 			ProgressOutput:   po,
 			RegistryService:  pm.config.RegistryService,
 			ReferenceStore:   rs,

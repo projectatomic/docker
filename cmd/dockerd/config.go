@@ -49,4 +49,7 @@ func installCommonConfigFlags(conf *config.Config, flags *pflag.FlagSet) {
 
 	conf.MaxConcurrentDownloads = &maxConcurrentDownloads
 	conf.MaxConcurrentUploads = &maxConcurrentUploads
+
+	flags.Var(opts.NewListOptsRef(&conf.BlockedRegistries, registry.ValidateIndexName), "block-registry", "Don't contact given registry")
+	flags.Var(opts.NewListOptsRef(&conf.AdditionalRegistries, registry.ValidateIndexName), "add-registry", "Registry to query before a public one")
 }

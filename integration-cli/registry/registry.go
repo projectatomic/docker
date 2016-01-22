@@ -37,6 +37,11 @@ type V2 struct {
 	email       string
 }
 
+// URL returns the registry url
+func (r *V2) URL() string {
+	return r.registryURL
+}
+
 // NewV2 creates a v2 registry server
 func NewV2(schema1 bool, auth, tokenURL, registryURL string) (*V2, error) {
 	tmp, err := ioutil.TempDir("", "registry-test-")
