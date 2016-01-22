@@ -19,13 +19,14 @@ const (
 
 type testRegistryV2 struct {
 	cmd      *exec.Cmd
+	url      string
 	dir      string
 	username string
 	password string
 	email    string
 }
 
-func newTestRegistryV2(c *check.C, schema1, auth bool) (*testRegistryV2, error) {
+func newTestRegistryV2At(c *check.C, url string, schema1, auth bool) (*testRegistryV2, error) {
 	tmp, err := ioutil.TempDir("", "registry-test-")
 	if err != nil {
 		return nil, err
@@ -39,10 +40,8 @@ http:
     addr: %s
 %s`
 	var (
-		htpasswd string
-		username string
-		password string
-		email    string
+		htpasswd                  string
+		username, password, email string
 	)
 	if auth {
 		htpasswdPath := filepath.Join(tmp, "htpasswd")
@@ -66,7 +65,7 @@ http:
 	if err != nil {
 		return nil, err
 	}
-	if _, err := fmt.Fprintf(config, template, tmp, privateRegistryURL, htpasswd); err != nil {
+	if _, err := fmt.Fprintf(config, template, tmp, url, htpasswd); err != nil {
 		os.RemoveAll(tmp)
 		return nil, err
 	}
@@ -85,6 +84,7 @@ http:
 	}
 	return &testRegistryV2{
 		cmd:      cmd,
+		url:      url,
 		dir:      tmp,
 		username: username,
 		password: password,
@@ -94,7 +94,7 @@ http:
 
 func (t *testRegistryV2) Ping() error {
 	// We always ping through HTTP for our test registry.
-	resp, err := http.Get(fmt.Sprintf("http://%s/v2/", privateRegistryURL))
+	resp, err := http.Get(fmt.Sprintf("http://%s/v2/", t.url))
 	if err != nil {
 		return err
 	}
