@@ -1,7 +1,6 @@
 package daemon
 
 import (
-	"net"
 	"os"
 	"runtime"
 	"strings"
@@ -70,11 +69,12 @@ func (daemon *Daemon) SystemInfo() (*types.Info, error) {
 	}
 
 	registries := []types.Registry{}
-	for _, ir := range daemon.RegistryService.Config.InsecureRegistryCIDRs {
-		registries = append(registries, types.Registry{(*net.IPNet)(ir).String(), false})
-	}
-	for n, i := range daemon.RegistryService.Config.IndexConfigs {
-		registries = append(registries, types.Registry{n, i.Secure})
+	for _, r := range registry.DefaultRegistries {
+		registry := types.Registry{Name: r}
+		if ic, ok := daemon.RegistryService.Config.IndexConfigs[r]; ok {
+			registry.Secure = ic.Secure
+		}
+		registries = append(registries, registry)
 	}
 
 	v := &types.Info{
