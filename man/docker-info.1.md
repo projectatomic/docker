@@ -60,7 +60,9 @@ Here is a sample output:
     Debug mode (server): false
     Username: xyz
     Registry: https://index.docker.io/v1/
-	
+    Registries: docker.io (secure), 127.0.0.0/8 (insecure)
+
+>>>>>>> ccec844... Add --add-registry and --block-registry options to docker daemon
 # HISTORY
 April 2014, Originally compiled by William Henry (whenry at redhat dot com)
 based on docker.com source material and internal work.

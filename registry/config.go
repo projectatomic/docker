@@ -68,6 +68,38 @@ var (
 // for mocking in unit tests
 var lookupIP = net.LookupIP
 
+var (
+	// BlockedRegistries is a set of registries that can't be contacted. A
+	// special entry "*" causes all registries but those present in
+	// RegistryList to be blocked.
+	BlockedRegistries map[string]struct{}
+	// DefaultRegistries is a list of default registries.
+	DefaultRegistries = []string{IndexName}
+)
+
+func init() {
+	BlockedRegistries = make(map[string]struct{})
+}
+
+// IndexServerName returns the name of default index server.
+func IndexServerName() string {
+	if len(DefaultRegistries) < 1 {
+		return ""
+	}
+	return DefaultRegistries[0]
+}
+
+// IndexServerAddress returns index uri of default registry.
+func IndexServerAddress() string {
+	if IndexServerName() == IndexName {
+		return IndexServer
+	} else if IndexServerName() == "" {
+		return ""
+	} else {
+		return fmt.Sprintf("https://%s/v1/", IndexServerName())
+	}
+}
+
 // InstallCliFlags adds command-line options to the top-level flag parser for
 // the current process.
 func (options *ServiceOptions) InstallCliFlags(cmd *flag.FlagSet, usageFn func(string) string) {
@@ -117,12 +149,22 @@ func newServiceConfig(options ServiceOptions) *serviceConfig {
 		}
 	}
 
-	// Configure public registry.
-	config.IndexConfigs[IndexName] = &registrytypes.IndexInfo{
-		Name:     IndexName,
-		Mirrors:  config.Mirrors,
-		Secure:   true,
-		Official: true,
+	for _, r := range DefaultRegistries {
+		var mirrors []string
+		if config.IndexConfigs[r] == nil {
+			// Use mirrors only with official index
+			if r == IndexName {
+				mirrors = config.Mirrors
+			} else {
+				mirrors = make([]string, 0)
+			}
+			config.IndexConfigs[r] = &registrytypes.IndexInfo{
+				Name:     r,
+				Mirrors:  mirrors,
+				Secure:   isSecureIndex(config, r),
+				Official: r == IndexName,
+			}
+		}
 	}
 
 	return config
@@ -144,6 +186,9 @@ func isSecureIndex(config *serviceConfig, indexName string) bool {
 	// is called from anything besides newIndexInfo, in order to honor per-index configurations.
 	if index, ok := config.IndexConfigs[indexName]; ok {
 		return index.Secure
+	}
+	if indexName == IndexName {
+		return true
 	}
 
 	host, _, err := net.SplitHostPort(indexName)
@@ -200,6 +245,14 @@ func ValidateIndexName(val string) (string, error) {
 	if val == reference.LegacyDefaultHostname {
 		val = reference.DefaultHostname
 	}
+	for _, r := range DefaultRegistries {
+		if val == r {
+			break
+		}
+		if val == "index."+r {
+			val = r
+		}
+	}
 	if strings.HasPrefix(val, "-") || strings.HasSuffix(val, "-") {
 		return "", fmt.Errorf("Invalid index name (%s). Cannot begin or end with a hyphen.", val)
 	}
@@ -231,7 +284,7 @@ func newIndexInfo(config *serviceConfig, indexName string) (*registrytypes.Index
 	index := &registrytypes.IndexInfo{
 		Name:     indexName,
 		Mirrors:  make([]string, 0),
-		Official: false,
+		Official: indexName == IndexName,
 	}
 	index.Secure = isSecureIndex(config, indexName)
 	return index, nil
@@ -248,12 +301,41 @@ func GetAuthConfigKey(index *registrytypes.IndexInfo) string {
 
 // newRepositoryInfo validates and breaks down a repository name into a RepositoryInfo
 func newRepositoryInfo(config *serviceConfig, name reference.Named) (*RepositoryInfo, error) {
-	index, err := newIndexInfo(config, name.Hostname())
+	indexName := name.Hostname()
+	if indexName == "" {
+		indexName = IndexServerName()
+		if indexName == "" {
+			return nil, fmt.Errorf("No default registry configured.")
+		}
+		fqr, err := reference.QualifyUnqualifiedReference(name, indexName)
+		if err != nil {
+			return nil, err
+		}
+		name = fqr
+	}
+	index, err := newIndexInfo(config, indexName)
 	if err != nil {
 		return nil, err
 	}
-	official := !strings.ContainsRune(name.Name(), '/')
+	official := index.Official && strings.HasPrefix(name.RemoteName(), reference.DefaultRepoPrefix)
 	return &RepositoryInfo{name, index, official}, nil
+}
+
+// IsIndexBlocked allows to check whether index/registry or endpoint
+// is on a block list.
+func IsIndexBlocked(indexName string) bool {
+	if _, ok := BlockedRegistries[indexName]; ok {
+		return true
+	}
+	if _, ok := BlockedRegistries["*"]; ok {
+		for _, name := range DefaultRegistries {
+			if indexName == name {
+				return false
+			}
+		}
+		return true
+	}
+	return false
 }
 
 // ParseRepositoryInfo performs the breakdown of a repository name into a RepositoryInfo, but
@@ -264,7 +346,7 @@ func ParseRepositoryInfo(reposName reference.Named) (*RepositoryInfo, error) {
 
 // ParseSearchIndexInfo will use repository name to get back an indexInfo.
 func ParseSearchIndexInfo(reposName string) (*registrytypes.IndexInfo, error) {
-	indexName, _ := splitReposSearchTerm(reposName)
+	indexName, _ := splitReposSearchTerm(reposName, true)
 
 	indexInfo, err := newIndexInfo(emptyServiceConfig, indexName)
 	if err != nil {
