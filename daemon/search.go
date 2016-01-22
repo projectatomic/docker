@@ -21,8 +21,8 @@ var acceptedSearchFilterTags = map[string]bool{
 // SearchRegistryForImages queries the registry for images matching
 // term. authConfig is used to login.
 func (daemon *Daemon) SearchRegistryForImages(ctx context.Context, filtersArgs string, term string, limit int,
-	authConfig *types.AuthConfig,
-	headers map[string][]string) (*registrytypes.SearchResults, error) {
+	authConfigs map[string]types.AuthConfig,
+	headers map[string][]string, noIndex bool) ([]registrytypes.SearchResultExt, error) {
 
 	searchFilters, err := filters.FromParam(filtersArgs)
 	if err != nil {
@@ -61,13 +61,13 @@ func (daemon *Daemon) SearchRegistryForImages(ctx context.Context, filtersArgs s
 		}
 	}
 
-	unfilteredResult, err := daemon.RegistryService.Search(ctx, term, limit, authConfig, dockerversion.DockerUserAgent(ctx), headers)
+	unfilteredResult, err := daemon.RegistryService.Search(ctx, term, limit, authConfigs, dockerversion.DockerUserAgent(ctx), headers, noIndex)
 	if err != nil {
 		return nil, err
 	}
 
-	filteredResults := []registrytypes.SearchResult{}
-	for _, result := range unfilteredResult.Results {
+	filteredResults := []registrytypes.SearchResultExt{}
+	for _, result := range unfilteredResult {
 		if searchFilters.Include("is-automated") {
 			if isAutomated != result.IsAutomated {
 				continue
@@ -86,9 +86,5 @@ func (daemon *Daemon) SearchRegistryForImages(ctx context.Context, filtersArgs s
 		filteredResults = append(filteredResults, result)
 	}
 
-	return &registrytypes.SearchResults{
-		Query:      unfilteredResult.Query,
-		NumResults: len(filteredResults),
-		Results:    filteredResults,
-	}, nil
+	return filteredResults, nil
 }

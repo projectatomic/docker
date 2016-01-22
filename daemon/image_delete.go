@@ -119,7 +119,14 @@ func (daemon *Daemon) ImageDelete(imageRef string, force, prune bool) ([]types.I
 				// Remove canonical references from same repository
 				remainingRefs := []reference.Named{}
 				for _, repoRef := range repoRefs {
-					if _, repoRefIsCanonical := repoRef.(reference.Canonical); repoRefIsCanonical && parsedRef.Name() == repoRef.Name() {
+					r := parsedRef
+					if !reference.IsReferenceFullyQualified(r) {
+						r, err = reference.SubstituteReferenceName(r, repoRef.Name())
+						if err != nil {
+							return nil, err
+						}
+					}
+					if _, repoRefIsCanonical := repoRef.(reference.Canonical); repoRefIsCanonical && r.Name() == repoRef.Name() {
 						if _, err := daemon.removeImageRef(repoRef); err != nil {
 							return records, err
 						}

@@ -2,7 +2,8 @@ package image
 
 import (
 	"fmt"
-	"sort"
+	"net"
+	"strconv"
 	"strings"
 	"text/tabwriter"
 
@@ -14,13 +15,13 @@ import (
 	"github.com/docker/docker/registry"
 	"github.com/docker/engine-api/types"
 	"github.com/docker/engine-api/types/filters"
-	registrytypes "github.com/docker/engine-api/types/registry"
 	"github.com/spf13/cobra"
 )
 
 type searchOptions struct {
 	term    string
 	noTrunc bool
+	noIndex bool
 	limit   int
 	filter  []string
 
@@ -46,6 +47,7 @@ func NewSearchCommand(dockerCli *client.DockerCli) *cobra.Command {
 	flags := cmd.Flags()
 
 	flags.BoolVar(&opts.noTrunc, "no-trunc", false, "Don't truncate output")
+	flags.BoolVar(&opts.noTrunc, "no-index", false, "Don't truncate output")
 	flags.StringSliceVarP(&opts.filter, "filter", "f", []string{}, "Filter output based on conditions provided")
 	flags.IntVar(&opts.limit, "limit", registry.DefaultSearchLimit, "Max number of search results")
 
@@ -66,10 +68,9 @@ func runSearch(dockerCli *client.DockerCli, opts searchOptions) error {
 
 	ctx := context.Background()
 
-	authConfig := dockerCli.ResolveAuthConfig(ctx, indexInfo)
-	requestPrivilege := dockerCli.RegistryAuthenticationPrivilegedFunc(indexInfo, "search")
+	requestPrivilege := dockerCli.RegistryAuthenticationPrivilegedFunc(indexInfo, "search", false)
 
-	encodedAuth, err := client.EncodeAuthToBase64(authConfig)
+	encodedAuth, err := client.EncodeAuthToBase64(dockerCli.ConfigFile().AuthConfigs)
 	if err != nil {
 		return err
 	}
@@ -85,51 +86,63 @@ func runSearch(dockerCli *client.DockerCli, opts searchOptions) error {
 
 	options := types.ImageSearchOptions{
 		RegistryAuth:  encodedAuth,
+		NoIndex:       opts.noIndex,
 		PrivilegeFunc: requestPrivilege,
 		Filters:       searchFilters,
 		Limit:         opts.limit,
 	}
 
 	clnt := dockerCli.Client()
-
-	unorderedResults, err := clnt.ImageSearch(ctx, opts.term, options)
+	results, err := clnt.ImageSearch(ctx, opts.term, options)
 	if err != nil {
 		return err
 	}
 
-	results := searchResultsByStars(unorderedResults)
-	sort.Sort(results)
-
 	w := tabwriter.NewWriter(dockerCli.Out(), 10, 1, 3, ' ', 0)
-	fmt.Fprintf(w, "NAME\tDESCRIPTION\tSTARS\tOFFICIAL\tAUTOMATED\n")
+	if opts.noIndex {
+		fmt.Fprintf(w, "NAME\tDESCRIPTION\tSTARS\tOFFICIAL\tAUTOMATED\n")
+	} else {
+		fmt.Fprintf(w, "INDEX\tNAME\tDESCRIPTION\tSTARS\tOFFICIAL\tAUTOMATED\n")
+	}
 	for _, res := range results {
 		// --automated and -s, --stars are deprecated since Docker 1.12
 		if (opts.automated && !res.IsAutomated) || (int(opts.stars) > res.StarCount) {
 			continue
 		}
+		row := []string{}
+		if !opts.noIndex {
+			indexName := res.IndexName
+			if !opts.noTrunc {
+				// Shorten index name to DOMAIN.TLD unless --no-trunc is given.
+				if host, _, err := net.SplitHostPort(indexName); err == nil {
+					indexName = host
+				}
+				// do not shorten ip address
+				if net.ParseIP(indexName) == nil {
+					// shorten index name just to the last 2 components (`DOMAIN.TLD`)
+					indexNameSubStrings := strings.Split(indexName, ".")
+					if len(indexNameSubStrings) > 2 {
+						indexName = strings.Join(indexNameSubStrings[len(indexNameSubStrings)-2:], ".")
+					}
+				}
+			}
+			row = append(row, indexName)
+		}
+
 		desc := strings.Replace(res.Description, "\n", " ", -1)
 		desc = strings.Replace(desc, "\r", " ", -1)
 		if !opts.noTrunc && len(desc) > 45 {
 			desc = stringutils.Truncate(desc, 42) + "..."
 		}
-		fmt.Fprintf(w, "%s\t%s\t%d\t", res.Name, desc, res.StarCount)
+		row = append(row, res.RegistryName+"/"+res.Name, desc, strconv.Itoa(res.StarCount), "", "")
 		if res.IsOfficial {
-			fmt.Fprint(w, "[OK]")
-
+			row[len(row)-2] = "[OK]"
 		}
-		fmt.Fprint(w, "\t")
 		if res.IsAutomated {
-			fmt.Fprint(w, "[OK]")
+			row[len(row)-1] = "[OK]"
 		}
-		fmt.Fprint(w, "\n")
+		fmt.Fprintf(w, "%s\n", strings.Join(row, "\t"))
 	}
 	w.Flush()
 	return nil
 }
-
-// SearchResultsByStars sorts search results in descending order by number of stars.
-type searchResultsByStars []registrytypes.SearchResult
-
-func (r searchResultsByStars) Len() int           { return len(r) }
-func (r searchResultsByStars) Swap(i, j int)      { r[i], r[j] = r[j], r[i] }
-func (r searchResultsByStars) Less(i, j int) bool { return r[j].StarCount < r[i].StarCount }

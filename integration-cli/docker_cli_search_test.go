@@ -70,7 +70,7 @@ func (s *DockerSuite) TestSearchCmdOptions(c *check.C) {
 	outSearchCmdOfficial, _ := dockerCmd(c, "search", "--filter", "is-official=true", "busybox") //The busybox is a busybox base image, official image.
 	outSearchCmdOfficialSlice := strings.Split(outSearchCmdOfficial, "\n")
 	c.Assert(outSearchCmdOfficialSlice, checker.HasLen, 3) // 1 header, 1 line, 1 carriage return
-	c.Assert(strings.HasPrefix(outSearchCmdOfficialSlice[1], "busybox "), check.Equals, true, check.Commentf("The busybox is an OFFICIAL image: %s", outSearchCmdNotOfficial))
+	c.Assert(strings.HasPrefix(outSearchCmdOfficialSlice[1], "docker.io   docker.io/busybox"), check.Equals, true, check.Commentf("The busybox is an OFFICIAL image: %s", outSearchCmdOfficial))
 
 	outSearchCmdStars, _ := dockerCmd(c, "search", "--filter", "stars=2", "busybox")
 	c.Assert(strings.Count(outSearchCmdStars, "[OK]") > strings.Count(outSearchCmd, "[OK]"), check.Equals, false, check.Commentf("The quantity of images with stars should be less than that of all images: %s", outSearchCmdStars))
@@ -81,7 +81,7 @@ func (s *DockerSuite) TestSearchCmdOptions(c *check.C) {
 	outSearchCmdautomated1, _ := dockerCmd(c, "search", "--automated=true", "busybox") //The busybox is a busybox base image, not an AUTOMATED image.
 	outSearchCmdautomatedSlice1 := strings.Split(outSearchCmdautomated1, "\n")
 	for i := range outSearchCmdautomatedSlice1 {
-		c.Assert(strings.HasPrefix(outSearchCmdautomatedSlice1[i], "busybox "), check.Equals, false, check.Commentf("The busybox is not an AUTOMATED image: %s", outSearchCmdautomated))
+		c.Assert(strings.HasPrefix(outSearchCmdautomatedSlice1[i], "docker.io   docker.io/busybox "), check.Equals, false, check.Commentf("The busybox is not an AUTOMATED image: %s", outSearchCmdautomated))
 	}
 
 	// -s --stars deprecated since Docker 1.13

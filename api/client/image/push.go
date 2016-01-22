@@ -43,15 +43,13 @@ func runPush(dockerCli *client.DockerCli, remote string) error {
 
 	ctx := context.Background()
 
-	// Resolve the Auth config relevant for this server
-	authConfig := dockerCli.ResolveAuthConfig(ctx, repoInfo.Index)
-	requestPrivilege := dockerCli.RegistryAuthenticationPrivilegedFunc(repoInfo.Index, "push")
+	requestPrivilege := dockerCli.RegistryAuthenticationPrivilegedFunc(repoInfo.Index, "push", reference.IsReferenceFullyQualified(ref))
 
 	if client.IsTrusted() {
-		return dockerCli.TrustedPush(ctx, repoInfo, ref, authConfig, requestPrivilege)
+		return dockerCli.TrustedPush(ctx, ref, repoInfo, requestPrivilege)
 	}
 
-	responseBody, err := dockerCli.ImagePushPrivileged(ctx, authConfig, ref.String(), requestPrivilege)
+	responseBody, err := dockerCli.ImagePushPrivileged(ctx, ref, requestPrivilege)
 	if err != nil {
 		return err
 	}

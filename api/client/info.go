@@ -213,5 +213,18 @@ func (cli *DockerCli) CmdInfo(args ...string) error {
 			fmt.Fprintf(cli.out, " %s/%d\n", registry.IP.String(), mask)
 		}
 	}
+
+	fmt.Fprintf(cli.out, "Registries: ")
+	regs := []string{}
+	for _, r := range info.Registries {
+		s := "secure"
+		if !r.Secure {
+			s = "insecure"
+		}
+		regs = append(regs, fmt.Sprintf("%s (%s)", r.Name, s))
+	}
+	fmt.Fprintf(cli.out, "%s", strings.Join(regs, ", "))
+	fmt.Fprintf(cli.out, "\n")
+
 	return nil
 }

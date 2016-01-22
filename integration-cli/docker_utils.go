@@ -230,11 +230,16 @@ func readBody(b io.ReadCloser) ([]byte, error) {
 
 func deleteContainer(container string) error {
 	container = strings.TrimSpace(strings.Replace(container, "\n", " ", -1))
+	if container == "" {
+		return nil
+	}
 	rmArgs := strings.Split(fmt.Sprintf("rm -fv %v", container), " ")
-	exitCode, err := runCommand(exec.Command(dockerBinary, rmArgs...))
+	out, exitCode, err := runCommandWithOutput(exec.Command(dockerBinary, rmArgs...))
 	// set error manually if not set
 	if exitCode != 0 && err == nil {
-		err = fmt.Errorf("failed to remove container: `docker rm` exit is non-zero")
+		err = fmt.Errorf("failed to remove container: `docker rm` exit is non-zero: \n%s", out)
+	} else if err != nil {
+		err = fmt.Errorf("failed to remove container: %v\n%s", err, out)
 	}
 
 	return err
@@ -254,11 +259,13 @@ func deleteAllContainers() error {
 	containers, err := getAllContainers()
 	if err != nil {
 		fmt.Println(containers)
+		fmt.Fprintf(os.Stderr, "deleteAllContainers: %v\n", err)
 		return err
 	}
 
 	if containers != "" {
 		if err = deleteContainer(containers); err != nil {
+			fmt.Fprintf(os.Stderr, "failed to delete containers %s: %v\n", containers, err)
 			return err
 		}
 	}
@@ -316,10 +323,13 @@ func deleteAllVolumes() error {
 		status, b, err := sockRequest("DELETE", "/volumes/"+v.Name, nil)
 		if err != nil {
 			errors = append(errors, err.Error())
+			fmt.Fprintf(os.Stderr, "deleteAllVolumes: %s\n", err.Error())
 			continue
 		}
 		if status != http.StatusNoContent {
-			errors = append(errors, fmt.Sprintf("error deleting volume %s: %s", v.Name, string(b)))
+			errMsg := fmt.Sprintf("error deleting volume %s: %s", v.Name, string(b))
+			fmt.Fprintf(os.Stderr, "%s\n", errMsg)
+			errors = append(errors, errMsg)
 		}
 	}
 	if len(errors) > 0 {
@@ -343,7 +353,7 @@ func getAllVolumes() ([]*types.Volume, error) {
 var protectedImages = map[string]struct{}{}
 
 func deleteAllImages() error {
-	cmd := exec.Command(dockerBinary, "images")
+	cmd := exec.Command(dockerBinary, "images", "--digests")
 	cmd.Env = appendBaseEnv(true)
 	out, err := cmd.CombinedOutput()
 	if err != nil {
@@ -356,20 +366,29 @@ func deleteAllImages() error {
 			continue
 		}
 		fields := strings.Fields(l)
-		imgTag := fields[0] + ":" + fields[1]
-		if _, ok := protectedImages[imgTag]; !ok {
+		imgRef := fields[0] + ":" + fields[1]
+		if fields[1] == "<none>" {
+			if fields[2] != "<none>" {
+				imgRef = fields[0] + "@" + fields[2]
+			} else {
+				imgRef = fields[0]
+			}
+		}
+		if _, ok := protectedImages[imgRef]; !ok {
 			if fields[0] == "<none>" {
-				imgs = append(imgs, fields[2])
+				imgs = append(imgs, fields[3])
 				continue
 			}
-			imgs = append(imgs, imgTag)
+			imgs = append(imgs, imgRef)
 		}
 	}
 	if len(imgs) == 0 {
 		return nil
 	}
 	args := append([]string{"rmi", "-f"}, imgs...)
-	if err := exec.Command(dockerBinary, args...).Run(); err != nil {
+	rmiCmd := exec.Command(dockerBinary, args...)
+	if out, _, err := runCommandWithOutput(rmiCmd); err != nil {
+		fmt.Fprintf(os.Stderr, "removing unprotected images (%s): failed with: %v\n%s", strings.Join(imgs, ", "), err, out)
 		return err
 	}
 	return nil
@@ -434,6 +453,7 @@ func deleteImages(images ...string) error {
 	exitCode, err := runCommand(rmiCmd)
 	// set error manually if not set
 	if exitCode != 0 && err == nil {
+		fmt.Fprintf(os.Stderr, "deleteImages: failed to remove images: %v\n", err)
 		err = fmt.Errorf("failed to remove image: `docker rmi` exit is non-zero")
 	}
 	return err
@@ -1270,8 +1290,8 @@ func parseEventTime(t time.Time) string {
 	return fmt.Sprintf("%d.%09d", t.Unix(), int64(t.Nanosecond()))
 }
 
-func setupRegistry(c *check.C, schema1 bool, auth, tokenURL string) *testRegistryV2 {
-	reg, err := newTestRegistryV2(c, schema1, auth, tokenURL)
+func setupRegistryAt(c *check.C, url string, schema1 bool, auth, tokenURL string) *testRegistryV2 {
+	reg, err := newTestRegistryV2At(c, url, schema1, auth, tokenURL)
 	c.Assert(err, check.IsNil)
 
 	// Wait for registry to be ready to serve requests.
@@ -1284,6 +1304,10 @@ func setupRegistry(c *check.C, schema1 bool, auth, tokenURL string) *testRegistr
 
 	c.Assert(err, check.IsNil, check.Commentf("Timeout waiting for test registry to become available: %v", err))
 	return reg
+}
+
+func setupRegistry(c *check.C, schema1 bool, auth, tokenURL string) *testRegistryV2 {
+	return setupRegistryAt(c, privateRegistryURL, schema1, auth, tokenURL)
 }
 
 func setupNotary(c *check.C) *testNotary {

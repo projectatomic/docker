@@ -59,8 +59,10 @@ func (c *containerAdapter) pullImage(ctx context.Context) error {
 
 	pr, pw := io.Pipe()
 	metaHeaders := map[string][]string{}
+	auths := map[string]types.AuthConfig{}
+	auths[c.container.image()] = *authConfig
 	go func() {
-		err := c.backend.PullImage(ctx, c.container.image(), "", metaHeaders, authConfig, pw)
+		err := c.backend.PullImage(ctx, c.container.image(), "", metaHeaders, auths, pw)
 		pw.CloseWithError(err)
 	}()
 

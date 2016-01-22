@@ -22,7 +22,9 @@ var (
 	registryImageName = "registry"
 
 	// the private registry to use for tests
-	privateRegistryURL = "127.0.0.1:5000"
+	privateRegistryURL  = "127.0.0.1:5000"
+	privateRegistryURL2 = "127.0.0.1:5001"
+	privateRegistryURL3 = "127.0.0.1:5002"
 
 	// TODO Windows CI. These are incorrect and need fixing into
 	// platform specific pieces.
