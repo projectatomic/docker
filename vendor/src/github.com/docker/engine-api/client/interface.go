@@ -56,7 +56,7 @@ type APIClient interface {
 	ImagePull(ctx context.Context, options types.ImagePullOptions, privilegeFunc RequestPrivilegeFunc) (io.ReadCloser, error)
 	ImagePush(ctx context.Context, options types.ImagePushOptions, privilegeFunc RequestPrivilegeFunc) (io.ReadCloser, error)
 	ImageRemove(ctx context.Context, options types.ImageRemoveOptions) ([]types.ImageDelete, error)
-	ImageSearch(ctx context.Context, options types.ImageSearchOptions, privilegeFunc RequestPrivilegeFunc) ([]registry.SearchResult, error)
+	ImageSearch(ctx context.Context, options types.ImageSearchOptions, privilegeFunc RequestPrivilegeFunc) ([]registry.SearchResultExt, error)
 	ImageSave(ctx context.Context, imageIDs []string) (io.ReadCloser, error)
 	ImageTag(ctx context.Context, options types.ImageTagOptions) error
 	Info(ctx context.Context) (types.Info, error)
