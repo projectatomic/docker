@@ -319,9 +319,10 @@ func notaryError(repoName string, err error) error {
 	return err
 }
 
-func (cli *DockerCli) trustedPull(repoInfo *registry.RepositoryInfo, ref registry.Reference, authConfig types.AuthConfig, requestPrivilege apiclient.RequestPrivilegeFunc) error {
+func (cli *DockerCli) trustedPull(distributionRef reference.Named, repoInfo *registry.RepositoryInfo, ref registry.Reference, requestPrivilege apiclient.RequestPrivilegeFunc) error {
 	var refs []target
 
+	authConfig := cli.resolveAuthConfig(repoInfo.Index)
 	notaryRepo, err := cli.getNotaryRepository(repoInfo, authConfig, "pull")
 	if err != nil {
 		fmt.Fprintf(cli.out, "Error establishing connection to trust repository: %s\n", err)
@@ -377,7 +378,7 @@ func (cli *DockerCli) trustedPull(repoInfo *registry.RepositoryInfo, ref registr
 		}
 		fmt.Fprintf(cli.out, "Pull (%d of %d): %s%s@%s\n", i+1, len(refs), repoInfo.Name(), displayTag, r.digest)
 
-		if err := cli.imagePullPrivileged(authConfig, repoInfo.Name(), r.digest.String(), requestPrivilege); err != nil {
+		if err := cli.imagePullPrivileged(distributionRef, r.digest.String(), requestPrivilege); err != nil {
 			return err
 		}
 
@@ -399,8 +400,8 @@ func (cli *DockerCli) trustedPull(repoInfo *registry.RepositoryInfo, ref registr
 	return nil
 }
 
-func (cli *DockerCli) trustedPush(repoInfo *registry.RepositoryInfo, tag string, authConfig types.AuthConfig, requestPrivilege apiclient.RequestPrivilegeFunc) error {
-	responseBody, err := cli.imagePushPrivileged(authConfig, repoInfo.Name(), tag, requestPrivilege)
+func (cli *DockerCli) trustedPush(ref reference.Named, repoInfo *registry.RepositoryInfo, tag string, requestPrivilege apiclient.RequestPrivilegeFunc) error {
+	responseBody, err := cli.imagePushPrivileged(ref, tag, requestPrivilege)
 	if err != nil {
 		return err
 	}
@@ -459,6 +460,7 @@ func (cli *DockerCli) trustedPush(repoInfo *registry.RepositoryInfo, tag string,
 
 	fmt.Fprintln(cli.out, "Signing and pushing trust metadata")
 
+	authConfig := cli.resolveAuthConfig(repoInfo.Index)
 	repo, err := cli.getNotaryRepository(repoInfo, authConfig, "push", "pull")
 	if err != nil {
 		fmt.Fprintf(cli.out, "Error establishing connection to notary repository: %s\n", err)

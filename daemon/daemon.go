@@ -740,7 +740,7 @@ func NewDaemon(config *Config, registryService *registry.Service, containerdRemo
 
 	eventsService := events.New()
 
-	referenceStore, err := reference.NewReferenceStore(filepath.Join(imageRoot, "repositories.json"))
+	referenceStore, err := reference.NewReferenceStore(filepath.Join(imageRoot, "repositories.json"), registry.DefaultRegistries...)
 	if err != nil {
 		return nil, fmt.Errorf("Couldn't create Tag store repositories: %s", err)
 	}
@@ -1384,9 +1384,10 @@ func (daemon *Daemon) AuthenticateToRegistry(ctx context.Context, authConfig *ty
 // SearchRegistryForImages queries the registry for images matching
 // term. authConfig is used to login.
 func (daemon *Daemon) SearchRegistryForImages(ctx context.Context, term string,
-	authConfig *types.AuthConfig,
-	headers map[string][]string) (*registrytypes.SearchResults, error) {
-	return daemon.RegistryService.Search(term, authConfig, dockerversion.DockerUserAgent(ctx), headers)
+	authConfigs map[string]types.AuthConfig,
+	headers map[string][]string,
+	noIndex bool) ([]registrytypes.SearchResultExt, error) {
+	return daemon.RegistryService.Search(term, authConfigs, dockerversion.DockerUserAgent(ctx), headers, noIndex)
 }
 
 // IsShuttingDown tells whether the daemon is shutting down or not

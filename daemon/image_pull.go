@@ -9,14 +9,13 @@ import (
 	"github.com/docker/docker/distribution"
 	"github.com/docker/docker/pkg/progress"
 	"github.com/docker/docker/reference"
-	"github.com/docker/docker/registry"
 	"github.com/docker/engine-api/types"
 	"golang.org/x/net/context"
 )
 
 // PullImage initiates a pull operation. image is the repository name to pull, and
 // tag may be either empty, or indicate a specific tag to pull.
-func (daemon *Daemon) PullImage(ctx context.Context, image, tag string, metaHeaders map[string][]string, authConfig *types.AuthConfig, outStream io.Writer) error {
+func (daemon *Daemon) PullImage(ctx context.Context, image, tag string, metaHeaders map[string][]string, authConfigs map[string]types.AuthConfig, outStream io.Writer) error {
 	// Special case: "pull -a" may send an image name with a
 	// trailing :. This is ugly, but let's not break API
 	// compatibility.
@@ -41,7 +40,7 @@ func (daemon *Daemon) PullImage(ctx context.Context, image, tag string, metaHead
 		}
 	}
 
-	return daemon.pullImageWithReference(ctx, ref, metaHeaders, authConfig, outStream)
+	return daemon.pullImageWithReference(ctx, ref, metaHeaders, authConfigs, outStream)
 }
 
 // PullOnBuild tells Docker to pull image referenced by `name`.
@@ -52,19 +51,9 @@ func (daemon *Daemon) PullOnBuild(ctx context.Context, name string, authConfigs 
 	}
 	ref = reference.WithDefaultTag(ref)
 
-	pullRegistryAuth := &types.AuthConfig{}
+	pullRegistryAuth := map[string]types.AuthConfig{}
 	if len(authConfigs) > 0 {
-		// The request came with a full auth config file, we prefer to use that
-		repoInfo, err := daemon.RegistryService.ResolveRepository(ref)
-		if err != nil {
-			return nil, err
-		}
-
-		resolvedConfig := registry.ResolveAuthConfig(
-			authConfigs,
-			repoInfo.Index,
-		)
-		pullRegistryAuth = &resolvedConfig
+		pullRegistryAuth = authConfigs
 	}
 
 	if err := daemon.pullImageWithReference(ctx, ref, nil, pullRegistryAuth, output); err != nil {
@@ -73,7 +62,7 @@ func (daemon *Daemon) PullOnBuild(ctx context.Context, name string, authConfigs 
 	return daemon.GetImage(name)
 }
 
-func (daemon *Daemon) pullImageWithReference(ctx context.Context, ref reference.Named, metaHeaders map[string][]string, authConfig *types.AuthConfig, outStream io.Writer) error {
+func (daemon *Daemon) pullImageWithReference(ctx context.Context, ref reference.Named, metaHeaders map[string][]string, authConfigs map[string]types.AuthConfig, outStream io.Writer) error {
 	// Include a buffer so that slow client connections don't affect
 	// transfer performance.
 	progressChan := make(chan progress.Progress, 100)
@@ -89,7 +78,7 @@ func (daemon *Daemon) pullImageWithReference(ctx context.Context, ref reference.
 
 	imagePullConfig := &distribution.ImagePullConfig{
 		MetaHeaders:      metaHeaders,
-		AuthConfig:       authConfig,
+		AuthConfigs:      authConfigs,
 		ProgressOutput:   progress.ChanOutput(progressChan),
 		RegistryService:  daemon.RegistryService,
 		ImageEventLogger: daemon.LogImageEvent,
