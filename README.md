@@ -96,17 +96,6 @@ If it found a base image of RHEL7.2 it would notify the user.
 
 https://github.com/docker/docker/pull/14258
 
-#### Fixed-docker-s-authentication-issue.patch
-
-Docker client sends configuration file with stored credentials together
-with several requests to Docker daemon. Daemon then takes the first
-authentication information and tries to use it against any registry it
-contacts. This results in authentication errors while trying pull from
-any registry but the one stored first in configuration file. This patch
-checks whether the given credentials belong to desired endpoint before
-creating an new session.  This patch is required to support multiple
-registries.
-
 #### Prefer-to-build-dynamic-binaries.patch
 
 Red Hat ships docker as a dynamic binary.  This patch changes the default
