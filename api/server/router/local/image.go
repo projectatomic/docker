@@ -9,6 +9,7 @@ import (
 	"net/http"
 	"strings"
 
+	"github.com/Sirupsen/logrus"
 	"github.com/docker/distribution/digest"
 	"github.com/docker/docker/api/server/httputils"
 	"github.com/docker/docker/builder/dockerfile"
@@ -335,6 +336,50 @@ func (s *router) getImagesByName(ctx context.Context, w http.ResponseWriter, r *
 	return httputils.WriteJSON(w, http.StatusOK, imageInspect)
 }
 
+func (s *router) getImagesTags(ctx context.Context, w http.ResponseWriter, r *http.Request, vars map[string]string) error {
+	name := vars["name"]
+	authEncoded := r.Header.Get("X-Registry-Auth")
+	authConfig := &types.AuthConfig{}
+	if authEncoded != "" {
+		authJSON := base64.NewDecoder(base64.URLEncoding, strings.NewReader(authEncoded))
+		if err := json.NewDecoder(authJSON).Decode(authConfig); err != nil {
+			// for a pull it is not an error if no auth was given
+			// to increase compatibility with the existing api it is defaulting to be empty
+			authConfig = &types.AuthConfig{}
+		}
+	}
+
+	var tagList *types.RepositoryTagList
+	reposName, err := reference.WithName(name)
+	if err != nil {
+		return nil
+	}
+
+	if !httputils.BoolValue(r, "remote") {
+		tagList, err = s.daemon.ListLocalTags(reposName)
+		if err != nil {
+			logrus.Warnf("failed to get local tags for %q: %v", name, err)
+		}
+	}
+
+	if tagList == nil || err != nil {
+		metaHeaders := map[string][]string{}
+		for k, v := range r.Header {
+			if strings.HasPrefix(k, "X-Meta-") {
+				metaHeaders[k] = v
+			}
+		}
+		tagList, err = s.daemon.ListRemoteTags(reposName, metaHeaders, authConfig)
+		if err != nil {
+			logrus.Warnf("failed to get remote tags for %q: %v", name, err)
+		}
+	}
+	if err != nil {
+		return err
+	}
+
+	return httputils.WriteJSON(w, http.StatusOK, tagList)
+}
 func (s *router) getImagesJSON(ctx context.Context, w http.ResponseWriter, r *http.Request, vars map[string]string) error {
 	if err := httputils.ParseForm(r); err != nil {
 		return err
