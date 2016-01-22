@@ -60,7 +60,7 @@ func (mf *v1ManifestFetcher) fetchWithSession(ctx context.Context, askedTag stri
 	repoData, err := mf.session.GetRepositoryData(mf.repoInfo)
 	if err != nil {
 		if strings.Contains(err.Error(), "HTTP code: 404") {
-			return nil, fmt.Errorf("Error: image %s not found", mf.repoInfo.RemoteName)
+			return nil, fmt.Errorf("Error: image %s not found", mf.repoInfo.RemoteName())
 		}
 		// Unexpected HTTP error
 		return nil, err
