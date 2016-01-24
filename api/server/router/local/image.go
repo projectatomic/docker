@@ -374,7 +374,7 @@ func (s *router) postImagesTag(ctx context.Context, w http.ResponseWriter, r *ht
 			return err
 		}
 	}
-	if err := s.daemon.TagImage(newTag, vars["name"], true); err != nil {
+	if err := s.daemon.TagImage(newTag, vars["name"]); err != nil {
 		return err
 	}
 	w.WriteHeader(http.StatusCreated)

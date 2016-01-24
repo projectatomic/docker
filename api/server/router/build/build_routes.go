@@ -254,7 +254,7 @@ func (br *buildRouter) postBuild(ctx context.Context, w http.ResponseWriter, r *
 	}
 
 	for _, rt := range repoAndTags {
-		if err := br.backend.TagImage(rt, imgID, true); err != nil {
+		if err := br.backend.TagImage(rt, imgID); err != nil {
 			return errf(err)
 		}
 	}

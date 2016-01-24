@@ -952,7 +952,7 @@ func (daemon *Daemon) changes(container *container.Container) ([]archive.Change,
 
 // TagImage creates a tag in the repository reponame, pointing to the image named
 // imageName.
-func (daemon *Daemon) TagImage(newTag reference.Named, imageName string, keepUnqualified bool) error {
+func (daemon *Daemon) TagImage(newTag reference.Named, imageName string) error {
 	imageID, err := daemon.GetImageID(imageName)
 	if err != nil {
 		return err
