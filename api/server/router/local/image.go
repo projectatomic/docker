@@ -630,7 +630,8 @@ func (s *router) getAuthConfigs(name string, r *http.Request, backward bool, sea
 			}
 		}
 		// this is the case when we fully qualify images
-		authConfigs[repoInfo.Index.Name] = authConfig
+		authConfigKey := repoInfo.Index.GetAuthConfigKey()
+		authConfigs[authConfigKey] = authConfig
 	}
 
 	return authConfigs, nil
