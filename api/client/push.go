@@ -65,9 +65,8 @@ func (cli *DockerCli) CmdPush(args ...string) error {
 		index = repoInfo.Index
 	}
 
-	_, _, err = cli.clientRequestAttemptLogin("POST", "/images/"+remote+"/push?"+v.Encode(), nil, cli.out, index, "push")
 	push := func() error {
-		_, _, err = cli.clientRequestAttemptLogin("POST", "/images/"+remote+"/push?"+v.Encode(), nil, cli.out, repoInfo.Index, "push")
+		_, _, err = cli.clientRequestAttemptLogin("POST", "/images/"+remote+"/push?"+v.Encode(), nil, cli.out, index, "push")
 		return err
 	}
 	if err = push(); err != nil {

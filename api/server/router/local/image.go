@@ -111,7 +111,8 @@ func (s *router) postImagesCreate(ctx context.Context, w http.ResponseWriter, r 
 			}
 		}
 
-		authConfigs, err := s.getAuthConfigs(image, r, false, false)
+		authConfigs := make(map[string]cliconfig.AuthConfig)
+		authConfigs, err = s.getAuthConfigs(image, r, false, false)
 		if err != nil {
 			return err
 		}

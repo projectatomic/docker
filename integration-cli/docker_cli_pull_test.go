@@ -48,20 +48,19 @@ func (s *DockerHubPullSuite) TestPullFromCentralRegistry(c *check.C) {
 func (s *DockerHubPullSuite) TestPullNonExistingImage(c *check.C) {
 	testRequires(c, DaemonIsLinux)
 	for _, e := range []struct {
-		Image    string
-		ImageTag string
-		Alias    string
+		Image string
+		Alias string
 	}{
-		{"library/asdfasdf", "library/asdfasdf:foobar", "asdfasdf:foobar"},
-		{"library/asdfasdf", "library/asdfasdf:foobar", "library/asdfasdf:foobar"},
-		{"library/asdfasdf", "library/asdfasdf:latest", "asdfasdf"},
-		{"library/asdfasdf", "library/asdfasdf:latest", "asdfasdf:latest"},
-		{"library/asdfasdf", "library/asdfasdf:latest", "library/asdfasdf"},
-		{"library/asdfasdf", "library/asdfasdf:latest", "library/asdfasdf:latest"},
+		{"library/asdfasdf:foobar", "asdfasdf:foobar"},
+		{"library/asdfasdf:foobar", "library/asdfasdf:foobar"},
+		{"library/asdfasdf:latest", "asdfasdf"},
+		{"library/asdfasdf:latest", "asdfasdf:latest"},
+		{"library/asdfasdf:latest", "library/asdfasdf"},
+		{"library/asdfasdf:latest", "library/asdfasdf:latest"},
 	} {
 		out, err := s.CmdWithError("pull", e.Alias)
-		c.Assert(err, check.IsNil)
-		c.Assert(out, checker.Contains, fmt.Sprintf("Trying to pull repository docker.io/%s ... not found", e.Image))
+		c.Assert(err, checker.NotNil, check.Commentf("expected non-zero exit status when pulling non-existing image: %s", out))
+		c.Assert(out, checker.Contains, fmt.Sprintf("Error: image %s not found", e.Image), check.Commentf("expected image not found error messages"))
 	}
 }
 
@@ -99,8 +98,8 @@ func (s *DockerHubPullSuite) TestPullFromCentralRegistryImplicitRefParts(c *chec
 func (s *DockerHubPullSuite) TestPullScratchNotAllowed(c *check.C) {
 	testRequires(c, DaemonIsLinux)
 	out, err := s.CmdWithError("pull", "scratch")
-	c.Assert(err, checker.IsNil, check.Commentf(out))
-	c.Assert(out, checker.Contains, "Trying to pull repository docker.io/library/scratch ... failed")
+	c.Assert(err, checker.NotNil, check.Commentf("expected pull of scratch to fail"))
+	c.Assert(out, checker.Contains, "'scratch' is a reserved name")
 	c.Assert(out, checker.Not(checker.Contains), "Pulling repository scratch")
 }
 
@@ -581,9 +580,7 @@ func (s *DockerRegistrySuite) doTestPullFromBlockedPublicRegistry(c *check.C, da
 	busyboxID := s.d.getAndTestImageEntry(c, 1, "busybox", "").id
 
 	// try to pull from docker.io
-	out, err := s.d.Cmd("pull", "library/hello-world")
-	c.Assert(err, check.IsNil)
-	if strings.Contains(out, "Trying to pull repository docker.io/library/hello-world ...") {
+	if out, err := s.d.Cmd("pull", "library/hello-world"); err == nil {
 		c.Fatalf("pull from blocked public registry should have failed, output: %s", out)
 	}
 
@@ -643,10 +640,8 @@ func (s *DockerRegistriesSuite) doTestPullFromPrivateRegistriesWithPublicBlocked
 	bbImg := s.d.getAndTestImageEntry(c, 1, "busybox", "")
 
 	// try to pull from blocked public registry
-	out, err := s.d.Cmd("pull", "library/hello-world")
-	c.Assert(err, check.IsNil)
-	if strings.Contains(out, "Trying to pull repository docker.io/library/hello-world ...") {
-		c.Fatalf("pull from blocked public registry should have failed, output: %s", out)
+	if out, err := s.d.Cmd("pull", "library/hello-world"); err == nil {
+		c.Fatalf("pulling from blocked public registry should have failed, output: %s", out)
 	}
 
 	// push busybox to
@@ -674,9 +669,7 @@ func (s *DockerRegistriesSuite) doTestPullFromPrivateRegistriesWithPublicBlocked
 	s.d.getAndTestImageEntry(c, 0, "", "")
 
 	// try to pull "library/busybox" from additional registry
-	out, err = s.d.Cmd("pull", "library/busybox")
-	c.Assert(err, check.IsNil)
-	if !strings.Contains(out, "Trying to pull repository 127.0.0.1:5000/library/busybox ... not found") {
+	if out, err := s.d.Cmd("pull", "library/busybox"); err == nil {
 		c.Fatalf("pull of library/busybox from additional registry should have failed, output: %q", out)
 	}
 
