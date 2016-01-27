@@ -49,8 +49,10 @@ Here is a sample output:
     Operating System: Ubuntu 14.04 LTS
     OSType: linux
     Architecture: x86_64
+    Number of Hooks: 2
     CPUs: 1
     Total Memory: 2 GiB
+    Registries: docker.io (secure), 127.0.0.0/8 (insecure)
 
 # HISTORY
 April 2014, Originally compiled by William Henry (whenry at redhat dot com)

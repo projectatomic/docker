@@ -142,6 +142,7 @@ type ImageBuildOptions struct {
 	BuildArgs      map[string]string
 	AuthConfigs    map[string]AuthConfig
 	Context        io.Reader
+	Binds          []string
 }
 
 // ImageBuildResponse holds information
@@ -203,6 +204,7 @@ type ImageRemoveOptions struct {
 type ImageSearchOptions struct {
 	Term         string
 	RegistryAuth string
+	NoIndex      bool
 }
 
 // ImageTagOptions holds parameters to tag an image

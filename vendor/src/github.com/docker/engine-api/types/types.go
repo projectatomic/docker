@@ -186,6 +186,13 @@ type Version struct {
 	KernelVersion string `json:",omitempty"`
 	Experimental  bool   `json:",omitempty"`
 	BuildTime     string `json:",omitempty"`
+	PkgVersion    string `json:",omitempty"`
+}
+
+// Registry holds information about a specific registry
+type Registry struct {
+	Name   string
+	Secure bool
 }
 
 // Info contains response of Remote API:
@@ -219,6 +226,7 @@ type Info struct {
 	LoggingDriver      string
 	NEventsListener    int
 	KernelVersion      string
+	PkgVersion         string
 	OperatingSystem    string
 	OSType             string
 	Architecture       string
@@ -236,6 +244,7 @@ type Info struct {
 	ServerVersion      string
 	ClusterStore       string
 	ClusterAdvertise   string
+	Registries         []Registry
 }
 
 // PluginsInfo is temp struct holds Plugins name

@@ -20,7 +20,6 @@ import (
 	"github.com/docker/docker/pkg/ioutils"
 	"github.com/docker/docker/pkg/urlutil"
 	"github.com/docker/docker/reference"
-	"github.com/docker/docker/registry"
 	"github.com/docker/engine-api/types"
 	"github.com/docker/engine-api/types/container"
 )
@@ -41,19 +40,9 @@ func (d Docker) Pull(name string, authConfigs map[string]types.AuthConfig, outpu
 	}
 	ref = reference.WithDefaultTag(ref)
 
-	pullRegistryAuth := &types.AuthConfig{}
+	pullRegistryAuth := make(map[string]types.AuthConfig)
 	if len(authConfigs) > 0 {
-		// The request came with a full auth config file, we prefer to use that
-		repoInfo, err := d.Daemon.RegistryService.ResolveRepository(ref)
-		if err != nil {
-			return nil, err
-		}
-
-		resolvedConfig := registry.ResolveAuthConfig(
-			authConfigs,
-			repoInfo.Index,
-		)
-		pullRegistryAuth = &resolvedConfig
+		pullRegistryAuth = authConfigs
 	}
 
 	if err := d.Daemon.PullImage(ref, nil, pullRegistryAuth, ioutils.NopWriteCloser(output)); err != nil {
