@@ -798,8 +798,10 @@ func (container *Container) SecretMount() (*execdriver.Mount, error) {
 
 	label.Relabel(secretsPath, container.MountLabel, false)
 
-	m := &execdriver.Mount{}
-	m.Source = secretsPath
-	m.Destination = "/run/secrets"
+	m := &execdriver.Mount{
+		Source:      secretsPath,
+		Destination: "/run/secrets",
+		Writable:    true,
+	}
 	return m, nil
 }
