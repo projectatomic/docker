@@ -1,0 +1,74 @@
+.TH FORWARD-JOURNALD 8 2016-02-29 REDHAT "System Manager's Manual"
+.SH NAME
+forward-journald \- forward stdin to journald
+.SH SYNOPSIS
+.B forward-journald
+[\fIOPTION\fR]...
+.SH DESCRIPTION
+Forward lines received from stdin to journald
+.SH OPTIONS
+.TP
+.B -1
+Use the priority of informational when writing to journald (default)
+.TP
+.B -2
+Use the priority of error when writing to journald
+.TP
+.BI -filter= NAME
+Use the argument
+.I NAME
+to determine which process is being fowarded
+.SH "EXIT STATUS"
+.TP
+0
+No errors occurred
+.TP
+1
+Bad/Missing options on command line
+.TP
+2
+Unable to find process to be forwarded. Process to be forwarded may have died on startup.
+.TP
+3
+Unable to connect to journald.
+.SH NOTES
+Workaround for
+.BR SIGPIPE
+issue with < go 1.6rc2, where writing 10 times to stdout or stderr will cause the
+.BR SIGPIPE
+events to be
+converted to a non-trappable
+.BR SIGPIPE
+killing any process written in
+.BR go(1).
+.SH BUGS
+Docker command crashes after journald is stopped (https://bugzilla.redhat.com/show_bug.cgi?id=1300076)
+.SH "EXAMPLE"
+Update docker.service to guard
+.BR docker(1)
+from the
+.BR SIGPIPE
+issue:
+.SS "docker.service"
+.nf
+:
+[Service]
+Type=notify
+NotifyAccess=all
+ExecStart=/bin/sh -c '/usr/bin/docker daemon \\
+          $OPTIONS \\
+          $DOCKER_STORAGE_OPTIONS \\
+          $DOCKER_NETWORK_OPTIONS \\
+          $INSECURE_REGISTRY \\
+          2>&1 | /usr/bin/forward-journald'
+StandardOutput=null
+StandardError=null
+:
+.fi
+.SH "SEE ALSO"
+.BR go(1),
+.BR docker(1),
+.BR systemd(1),
+.BR journald(1)
+.BR systemd-journald(8),
+
