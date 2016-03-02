@@ -21,8 +21,8 @@ clone git github.com/tchap/go-patricia v2.1.0
 clone git github.com/vdemeester/shakers 3c10293ce22b900c27acad7b28656196fcc2f73b
 clone git golang.org/x/net 47990a1ba55743e6ef1affd3a14e5bac8553615d https://github.com/golang/net.git
 clone git github.com/docker/go-units 651fc226e7441360384da338d0fd37f2440ffbe3
-clone git github.com/docker/go-connections v0.1.2
-clone git github.com/docker/engine-api v0.2.3
+clone git github.com/docker/go-connections v0.2.0
+clone git github.com/docker/engine-api 7108f731dd4aeede9a259d0b1a86f0b7d94f12c2
 clone git github.com/RackSec/srslog 6eb773f331e46fbba8eecb8e794e635e75fc04de
 clone git github.com/imdario/mergo 0.2.1
 
