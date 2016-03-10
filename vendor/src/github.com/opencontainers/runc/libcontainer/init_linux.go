@@ -5,6 +5,7 @@ package libcontainer
 import (
 	"encoding/json"
 	"fmt"
+	"io"
 	"io/ioutil"
 	"net"
 	"os"
@@ -73,6 +74,7 @@ func newContainerInit(t initType, pipe *os.File) (initer, error) {
 		}, nil
 	case initStandard:
 		return &linuxStandardInit{
+			pipe:      pipe,
 			parentPid: syscall.Getppid(),
 			config:    config,
 		}, nil
@@ -154,6 +156,48 @@ func joinExistingNamespaces(namespaces []configs.Namespace) error {
 			if err != nil {
 				return err
 			}
+		}
+	}
+	return nil
+}
+
+// syncParentReady sends to the given pipe a JSON payload which indicates that
+// the init is ready to Exec the child process. It then waits for the parent to
+// indicate that it is cleared to Exec.
+func syncParentReady(pipe io.ReadWriter) error {
+	// Tell parent.
+	if err := utils.WriteJSON(pipe, syncT{procReady}); err != nil {
+		return err
+	}
+	// Wait for parent to give the all-clear.
+	var procSync syncT
+	if err := json.NewDecoder(pipe).Decode(&procSync); err != nil {
+		if err == io.EOF {
+			return fmt.Errorf("parent closed synchronisation channel ready")
+		}
+		if procSync.Type != procRun {
+			return fmt.Errorf("invalid synchronisation flag from parent")
+		}
+	}
+	return nil
+}
+
+// syncParentHooks sends to the given pipe a JSON payload which indicates that
+// the parent should execute pre-start hooks. It then waits for the parent to
+// indicate that it is cleared to resume.
+func syncParentHooks(pipe io.ReadWriter) error {
+	// Tell parent.
+	if err := utils.WriteJSON(pipe, syncT{procHooks}); err != nil {
+		return err
+	}
+	// Wait for parent to give the all-clear.
+	var procSync syncT
+	if err := json.NewDecoder(pipe).Decode(&procSync); err != nil {
+		if err == io.EOF {
+			return fmt.Errorf("parent closed synchronisation channel sync")
+		}
+		if procSync.Type != procResume {
+			return fmt.Errorf("invalid synchronisation flag from parent")
 		}
 	}
 	return nil
