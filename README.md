@@ -136,11 +136,12 @@ of starting and stopping of containers.  For example have a log agent that
 records when a container starts and stops and then sends a message to a
 monitoring station.
 
-Dockerhooks reads directory in either /usr/lib/docker/hooks.d or
-/usr/libexec/docker/hooks.d to search for hooks, if the directory exists
-docker will execute the executables in this directory via runc/libcontainer i
-using PreStart and PostStop.  It will also send the config.json file as the
-second paramater.
+Dockerhooks reads directory in either /usr/libexec/oci/hooks.d to search for hooks,
+if the directory exists docker will execute the executables in this directory via
+runc/libcontainer using PreStart and PostStop.  It will also send the config.json
+file as the second paramater. These hooks allow us to use oci-systemd-hook and
+oci-register-machine hooks, which register the docker container with the host, and
+allow you to run systemd as pid1 inside of a container without requiring --privilege.
 
 https://github.com/docker/docker/pull/17021
 

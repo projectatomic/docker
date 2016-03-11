@@ -13,7 +13,7 @@ import (
 	"github.com/opencontainers/runc/libcontainer/configs"
 )
 
-const hookDirPath = "/usr/lib/docker/hooks.d"
+const hookDirPath = "/usr/libexec/oci/hooks.d"
 
 // Prestart function will be called after container process is created but
 // before it is started
