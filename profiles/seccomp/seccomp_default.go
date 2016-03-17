@@ -1650,5 +1650,30 @@ var DefaultProfile = &types.Seccomp{
 			Action: types.ActAllow,
 			Args:   []*types.Arg{},
 		},
+		{
+			Name:   "mount",
+			Action: types.ActAllow,
+			Args:   []*types.Arg{},
+		},
+		{
+			Name:   "umount2",
+			Action: types.ActAllow,
+			Args:   []*types.Arg{},
+		},
+		{
+			Name:   "reboot",
+			Action: types.ActAllow,
+			Args:   []*types.Arg{},
+		},
+		{
+			Name:   "name_to_handle_at",
+			Action: types.ActAllow,
+			Args:   []*types.Arg{},
+		},
+		{
+			Name:   "unshare",
+			Action: types.ActAllow,
+			Args:   []*types.Arg{},
+		},
 	},
 }
