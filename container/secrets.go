@@ -1,0 +1,99 @@
+package container
+
+import (
+	"fmt"
+	"io/ioutil"
+	"os"
+	"path/filepath"
+)
+
+const (
+	baseDir     = "/usr/share/rhel/secrets"
+	overrideDir = "/etc/container/rhel/secrets"
+)
+
+// Secret info
+type Secret struct {
+	Name      string
+	IsDir     bool
+	HostBased bool
+}
+
+// SecretData info
+type SecretData struct {
+	Name string
+	Data []byte
+}
+
+// SaveTo saves secret data to given directory
+func (s SecretData) SaveTo(dir string) error {
+	path := filepath.Join(dir, s.Name)
+	if err := os.MkdirAll(filepath.Dir(path), 0700); err != nil && !os.IsExist(err) {
+		return err
+	}
+	return ioutil.WriteFile(path, s.Data, 0700)
+}
+
+func readAll(root, prefix string) ([]SecretData, error) {
+	path := filepath.Join(root, prefix)
+
+	data := []SecretData{}
+
+	files, err := ioutil.ReadDir(path)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return data, nil
+		}
+
+		return nil, err
+	}
+
+	for _, f := range files {
+		fileData, err := readFile(root, filepath.Join(prefix, f.Name()))
+		if err != nil {
+			// If the file did not exist, might be a dangling symlink
+			// Ignore the error
+			if os.IsNotExist(err) {
+				continue
+			}
+			return nil, err
+		}
+		data = append(data, fileData...)
+	}
+
+	return data, nil
+}
+
+func readFile(root, name string) ([]SecretData, error) {
+	path := filepath.Join(root, name)
+
+	s, err := os.Stat(path)
+	if err != nil {
+		return nil, err
+	}
+
+	if s.IsDir() {
+		dirData, err := readAll(root, name)
+		if err != nil {
+			return nil, err
+		}
+		return dirData, nil
+	}
+	bytes, err := ioutil.ReadFile(path)
+	if err != nil {
+		return nil, err
+	}
+	return []SecretData{{Name: name, Data: bytes}}, nil
+}
+
+func getHostSecretData() ([]SecretData, error) {
+	baseSecrets, err := readAll(baseDir, "")
+	if err != nil {
+		return nil, fmt.Errorf("Failed to read secrets from %s: %s\n", baseDir, err.Error())
+	}
+	overrideSecrets, err := readAll(overrideDir, "")
+	if err != nil {
+		return nil, fmt.Errorf("Failed to read secrets from %s: %s\n", overrideDir, err.Error())
+	}
+	return append(baseSecrets, overrideSecrets...), nil
+}

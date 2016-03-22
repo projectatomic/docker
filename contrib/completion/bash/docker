@@ -1907,6 +1907,7 @@ _docker_daemon() {
 	local boolean_options="
 		$global_boolean_options
 		--disable-legacy-registry
+		--enable-secrets
 		--experimental
 		--help
 		--icc=false

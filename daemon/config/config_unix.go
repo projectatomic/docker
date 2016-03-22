@@ -30,6 +30,7 @@ type Config struct {
 	InitPath             string                   `json:"init-path,omitempty"`
 	SeccompProfile       string                   `json:"seccomp-profile,omitempty"`
 	ShmSize              opts.MemBytes            `json:"default-shm-size,omitempty"`
+	EnableSecrets        bool                     `json:"enable-secrets"`
 }
 
 // BridgeConfig stores all the bridge driver specific

@@ -87,6 +87,11 @@ func (container *Container) UpdateContainer(hostConfig *containertypes.HostConfi
 	return nil
 }
 
+// SecretMountRHEL returns the Secret Mount point
+func (container *Container) SecretMountRHEL(rootUID, rootGID int) (*Mount, error) {
+	return nil, nil
+}
+
 // cleanResourcePath cleans a resource path by removing C:\ syntax, and prepares
 // to combine with a volume path
 func cleanResourcePath(path string) string {

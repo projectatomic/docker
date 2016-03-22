@@ -17,6 +17,11 @@ func (container *Container) SecretMount() *Mount {
 	return nil
 }
 
+// SecretMountRHEL returns the mount for the secret path
+func (container *Container) SecretMountRHEL(rootUID, rootGID int) (*Mount, error) {
+	return nil
+}
+
 // UnmountSecrets unmounts the fs for secrets
 func (container *Container) UnmountSecrets() error {
 	return nil
