@@ -66,6 +66,7 @@ storage driver and a node that is part of a 2-node swarm:
     Operating System: Ubuntu 16.04 LTS
     OSType: linux
     Architecture: x86_64
+    Number of Hooks: 2
     CPUs: 24
     Total Memory: 62.86 GiB
     Name: docker
