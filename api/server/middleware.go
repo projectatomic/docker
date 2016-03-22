@@ -31,6 +31,8 @@ func (s *Server) handleWithGlobalMiddlewares(handler httputils.APIFunc) httputil
 		next = middleware.DebugRequestMiddleware(next)
 	}
 
+	next = middleware.AuditMiddleware(next, s.daemon)
+
 	if len(s.cfg.AuthorizationPluginNames) > 0 {
 		s.authZPlugins = authorization.NewPlugins(s.cfg.AuthorizationPluginNames)
 		handleAuthorization := middleware.NewAuthorizationMiddleware(s.authZPlugins)
