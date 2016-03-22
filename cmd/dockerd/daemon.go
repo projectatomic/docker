@@ -446,4 +446,6 @@ func (cli *DaemonCli) initMiddlewares(s *apiserver.Server, cfg *apiserver.Config
 		handleAuthorization := authorization.NewMiddleware(authZPlugins)
 		s.UseMiddleware(handleAuthorization)
 	}
+	a := middleware.NewAuditMiddleware(cli.d)
+	s.UseMiddleware(a)
 }

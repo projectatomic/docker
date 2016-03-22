@@ -13,18 +13,17 @@ import (
 	"syscall"
 
 	"github.com/Sirupsen/logrus"
-	"github.com/docker/docker/api/server/httputils"
 	"github.com/docker/docker/container"
 	"github.com/docker/docker/daemon"
-	"github.com/docker/docker/pkg/version"
+	"github.com/docker/docker/pkg/audit"
 	"github.com/docker/engine-api/types/versions/v1p20"
 	"golang.org/x/net/context"
 )
 
-// AuditMiddleware logs actions and information about containers when they're started.
-func AuditMiddleware(handler httputils.APIFunc, d *daemon.Daemon) httputils.APIFunc {
+// WrapHandler returns a new handler function wrapping the previous one in the request chain.
+func (a AuditMiddleware) WrapHandler(handler func(ctx context.Context, w http.ResponseWriter, r *http.Request, vars map[string]string) error) func(ctx context.Context, w http.ResponseWriter, r *http.Request, vars map[string]string) error {
 	return func(ctx context.Context, w http.ResponseWriter, r *http.Request, vars map[string]string) error {
-		logAction(w, r, d)
+		logAction(w, r, a.d)
 		return handler(ctx, w, r, vars)
 	}
 }
@@ -38,6 +37,20 @@ func getFdFromWriter(w http.ResponseWriter) int {
 	if writerVal.Kind() != reflect.Struct {
 		logrus.Warnf("ResponseWriter is not a struct but %s", writerVal.Kind())
 		return -1
+	}
+	httpconn := writerVal.FieldByName("conn")
+	if !httpconn.IsValid() {
+		// probably writerVal contains "rw" which is the ResponseWriter
+		rwPtr := writerVal.FieldByName("rw")
+		if !rwPtr.IsValid() {
+			logrus.Warn("ResponseWriter does not contain a field named conn nor rw")
+			return -1
+		}
+		writerVal = reflect.Indirect(rwPtr.Elem())
+		if writerVal.Kind() != reflect.Struct {
+			logrus.Warnf("ResponseWriter is not a struct but %s", writerVal.Kind())
+			return -1
+		}
 	}
 	//Get the underlying http connection
 	httpconnVal := writerVal.FieldByName("conn").Elem()
@@ -53,8 +66,15 @@ func getFdFromWriter(w http.ResponseWriter) int {
 		return -1
 	}
 
-	cPtr := rwc.Field(0).Elem()
-	c := cPtr.Elem()
+	var c reflect.Value
+	if rwc.Field(0).Kind() != reflect.Struct {
+		// this is the case of the unix socket with go1.6 compatibility fix!
+		cPtr := rwc.Field(0).Elem()
+		c = cPtr.Elem()
+	} else {
+		// this is the normal tcp case
+		c = rwc.FieldByName("conn")
+	}
 	netfd := c.FieldByName("fd").Elem()
 	//Grab sysfd
 	if netfd.Kind() != reflect.Struct {
@@ -181,8 +201,7 @@ func logAction(w http.ResponseWriter, r *http.Request, d *daemon.Daemon) error {
 	switch action {
 	case "start":
 		if d != nil && c != nil {
-			version := version.Version("1.20")
-			inspect, err := d.ContainerInspect(c.ID, false, version)
+			inspect, err := d.ContainerInspect(c.ID, false, "1.20")
 			if err == nil {
 				message = ", " + generateContainerConfigMsg(c, inspect.(*v1p20.ContainerJSON))
 			}
@@ -242,18 +261,58 @@ func logAction(w http.ResponseWriter, r *http.Request, d *daemon.Daemon) error {
 	// Log info messages at Debug Level
 	// Log messages that change state at Info level
 	switch action {
-	case "info":
-	case "images":
-	case "version":
-	case "json":
-	case "search":
-	case "stats":
-	case "events":
-	case "history":
+	case "history", "events", "stats", "search", "json", "version", "images", "info":
 		logrus.Debug(message)
-		fallthrough
 	default:
 		logrus.Info(message)
+		logAuditlog(c, action, username, loginuid, true)
 	}
 	return nil
+}
+
+//Logs an API event to the audit log
+func logAuditlog(c *container.Container, action string, username string, loginuid int64, success bool) {
+	virt := audit.AuditVirtControl
+	vm := "?"
+	vmPid := "?"
+	exe := "?"
+	hostname := "?"
+	user := "?"
+	auid := "?"
+
+	if c != nil {
+		vm = c.Config.Image
+		vmPid = fmt.Sprint(c.State.Pid)
+		exe = c.Path
+		hostname = c.Config.Hostname
+	}
+
+	if username != "" {
+		user = username
+	}
+
+	if loginuid != -1 {
+		auid = fmt.Sprint(loginuid)
+	}
+
+	vars := map[string]string{
+		"op":       action,
+		"reason":   "api",
+		"vm":       vm,
+		"vm-pid":   vmPid,
+		"user":     user,
+		"auid":     auid,
+		"exe":      exe,
+		"hostname": hostname,
+	}
+
+	//Encoding is a function of libaudit that ensures
+	//that the audit values contain only approved characters.
+	for key, value := range vars {
+		if audit.ValueNeedsEncoding(value) {
+			vars[key] = audit.EncodeNVString(key, value)
+		}
+	}
+	message := audit.FormatVars(vars)
+	audit.LogUserEvent(virt, message, success)
 }
