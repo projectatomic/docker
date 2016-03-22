@@ -23,6 +23,7 @@
 # the case. Therefore, you don't have to disable it anymore.
 #
 
+# Cut for distribution specific
 FROM debian:jessie
 
 # add zfs ppa
@@ -76,6 +77,18 @@ RUN apt-get update && apt-get install -y \
 	tar \
 	zip \
 	--no-install-recommends \
+# End dependencies cut
+	automake \
+	git \
+	jq \
+	iptables \
+	libtool \
+	mercurial \
+	parallel \
+	python-devel \
+	python-mock \
+	python-pip \
+	zip \
 	&& pip install awscli==1.10.15 \
 	&& ln -snf /usr/bin/clang-3.8 /usr/local/bin/clang \
 	&& ln -snf /usr/bin/clang++-3.8 /usr/local/bin/clang++
@@ -203,7 +216,9 @@ RUN useradd --create-home --gid docker unprivilegeduser
 
 VOLUME /var/lib/docker
 WORKDIR /go/src/github.com/docker/docker
+#  Cut for buildtags distribution specific
 ENV DOCKER_BUILDTAGS apparmor pkcs11 seccomp selinux
+# End buildtags cut
 
 # Let us use a .bashrc file
 RUN ln -sfv $PWD/.bashrc ~/.bashrc
@@ -254,7 +269,9 @@ RUN set -x \
 	&& git clone git://github.com/opencontainers/runc.git "$GOPATH/src/github.com/opencontainers/runc" \
 	&& cd "$GOPATH/src/github.com/opencontainers/runc" \
 	&& git checkout -q "$RUNC_COMMIT" \
+#  Cut for buildtags runc distribution specific
 	&& make static BUILDTAGS="seccomp apparmor selinux" \
+# End buildtags runc cut
 	&& cp runc /usr/local/bin/docker-runc
 
 # Install containerd
