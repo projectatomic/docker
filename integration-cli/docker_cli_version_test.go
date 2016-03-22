@@ -11,14 +11,15 @@ import (
 func (s *DockerSuite) TestVersionEnsureSucceeds(c *check.C) {
 	out, _ := dockerCmd(c, "version")
 	stringsToCheck := map[string]int{
-		"Client:":       1,
-		"Server:":       1,
-		" Version:":     2,
-		" API version:": 2,
-		" Go version:":  2,
-		" Git commit:":  2,
-		" OS/Arch:":     2,
-		" Built:":       2,
+		"Client:":           1,
+		"Server:":           1,
+		" Version:":         2,
+		" API version:":     2,
+		" Package version:": 2,
+		" Go version:":      2,
+		" Git commit:":      2,
+		" OS/Arch:":         2,
+		" Built:":           2,
 	}
 
 	for k, v := range stringsToCheck {
@@ -40,10 +41,10 @@ func (s *DockerSuite) TestVersionPlatform_l(c *check.C) {
 
 func testVersionPlatform(c *check.C, platform string) {
 	out, _ := dockerCmd(c, "version")
-	expected := "OS/Arch:      " + platform
+	expected := "OS/Arch:         " + platform
 
 	split := strings.Split(out, "\n")
-	c.Assert(len(split) >= 14, checker.Equals, true, check.Commentf("got %d lines from version", len(split)))
+	c.Assert(len(split) >= 16, checker.Equals, true, check.Commentf("got %d lines from version", len(split)))
 
 	// Verify the second 'OS/Arch' matches the platform. Experimental has
 	// more lines of output than 'regular'
