@@ -641,6 +641,18 @@ func (daemon *Daemon) createSpec(c *container.Container) (*libcontainerd.Spec, e
 	}
 	mounts = append(mounts, c.IpcMounts()...)
 	mounts = append(mounts, c.TmpfsMounts()...)
+
+	rootUID, rootGID := daemon.GetRemappedUIDGID()
+	m, err := c.SecretMount(rootUID, rootGID)
+	if err != nil {
+		return nil, err
+	}
+	// SecretMount() returns m == nil && err == nil
+	// we check m before appending and dereferencing it
+	if m != nil {
+		mounts = append(mounts, *m)
+	}
+
 	if err := setMounts(daemon, &s, c, mounts); err != nil {
 		return nil, fmt.Errorf("linux mounts: %v", err)
 	}
