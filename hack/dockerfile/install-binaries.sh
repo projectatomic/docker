@@ -16,7 +16,7 @@ else
 fi
 
 # Do not build with ambient capabilities support
-RUNC_BUILDTAGS="${RUNC_BUILDTAGS:-"seccomp apparmor selinux"}"
+RUNC_BUILDTAGS="${RUNC_BUILDTAGS:-"seccomp selinux"}"
 
 install_runc() {
 	echo "Install runc version $RUNC_COMMIT"

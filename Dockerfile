@@ -23,6 +23,7 @@
 # the case. Therefore, you don't have to disable it anymore.
 #
 
+# Cut for distribution specific
 FROM debian:jessie
 
 # allow replacing httpredir or deb mirror
@@ -46,7 +47,6 @@ RUN apt-get update && apt-get install -y \
 	btrfs-tools \
 	build-essential \
 	clang \
-	cmake \
 	createrepo \
 	curl \
 	dpkg-sig \
@@ -75,11 +75,24 @@ RUN apt-get update && apt-get install -y \
 	python-websocket \
 	tar \
 	ubuntu-zfs \
-	vim \
-	vim-common \
 	xfsprogs \
 	zip \
 	--no-install-recommends \
+# End dependencies cut
+	cmake \
+	vim \
+	vim-common \
+	automake \
+	git \
+	jq \
+	iptables \
+	libtool \
+	mercurial \
+	parallel \
+	python-devel \
+	python-mock \
+	python-pip \
+	zip \
 	&& pip install awscli==1.10.15
 # Get lvm2 source for compiling statically
 ENV LVM2_VERSION 2.02.103
@@ -116,7 +129,9 @@ RUN set -x \
 		| tar -xzC "$SECCOMP_PATH" --strip-components=1 \
 	&& ( \
 		cd "$SECCOMP_PATH" \
+# Cut for seccomp prefix
 		&& ./configure --prefix=/usr/local \
+# End seccomp prefix cut
 		&& make \
 		&& make install \
 		&& ldconfig \
@@ -215,7 +230,9 @@ RUN useradd --create-home --gid docker unprivilegeduser
 
 VOLUME /var/lib/docker
 WORKDIR /go/src/github.com/docker/docker
+#  Cut for buildtags distribution specific
 ENV DOCKER_BUILDTAGS apparmor pkcs11 seccomp selinux
+# End buildtags cut
 
 # Let us use a .bashrc file
 RUN ln -sfv $PWD/.bashrc ~/.bashrc
