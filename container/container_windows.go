@@ -77,6 +77,11 @@ func (container *Container) UpdateContainer(hostConfig *containertypes.HostConfi
 	return nil
 }
 
+// SecretMount returns the Secret Mount point
+func (container *Container) SecretMount(rootUID, rootGID int) (*Mount, error) {
+	return nil, nil
+}
+
 // appendNetworkMounts appends any network mounts to the array of mount points passed in.
 // Windows does not support network mounts (not to be confused with SMB network mounts), so
 // this is a no-op.
