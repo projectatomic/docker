@@ -56,6 +56,7 @@ RUN apt-get update && apt-get install -y \
 	jq \
 	less \
 	libapparmor-dev \
+	libaudit-dev \
 	libcap-dev \
 	libltdl-dev \
 	libnl-3-dev \
