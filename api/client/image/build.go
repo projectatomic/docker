@@ -39,6 +39,7 @@ type buildOptions struct {
 	tags           opts.ListOpts
 	labels         []string
 	buildArgs      opts.ListOpts
+	buildVolumes   opts.ListOpts
 	ulimits        *runconfigopts.UlimitOpt
 	memory         string
 	memorySwap     string
@@ -61,9 +62,10 @@ type buildOptions struct {
 func NewBuildCommand(dockerCli *client.DockerCli) *cobra.Command {
 	ulimits := make(map[string]*units.Ulimit)
 	options := buildOptions{
-		tags:      opts.NewListOpts(validateTag),
-		buildArgs: opts.NewListOpts(runconfigopts.ValidateEnv),
-		ulimits:   runconfigopts.NewUlimitOpt(&ulimits),
+		tags:         opts.NewListOpts(validateTag),
+		buildArgs:    opts.NewListOpts(runconfigopts.ValidateEnv),
+		buildVolumes: opts.NewListOpts(nil),
+		ulimits:      runconfigopts.NewUlimitOpt(&ulimits),
 	}
 
 	cmd := &cobra.Command{
@@ -98,6 +100,8 @@ func NewBuildCommand(dockerCli *client.DockerCli) *cobra.Command {
 	flags.BoolVar(&options.forceRm, "force-rm", false, "Always remove intermediate containers")
 	flags.BoolVarP(&options.quiet, "quiet", "q", false, "Suppress the build output and print image ID on success")
 	flags.BoolVar(&options.pull, "pull", false, "Always attempt to pull a newer version of the image")
+
+	flags.VarP(&options.buildVolumes, "volume", "v", "Set build-time bind mounts")
 
 	client.AddTrustedFlags(flags, true)
 
@@ -243,6 +247,21 @@ func runBuild(dockerCli *client.DockerCli, options buildOptions) error {
 		}
 	}
 
+	var binds []string
+	// add any bind targets to the list of container volumes
+	for bind := range options.buildVolumes.GetMap() {
+		if arr := runconfigopts.VolumeSplitN(bind, 2); len(arr) > 1 {
+			// after creating the bind mount we want to delete it from the flBuildVolumes values because
+			// we do not want bind mounts being committed to image configs
+			binds = append(binds, bind)
+			options.buildVolumes.Delete(bind)
+		}
+	}
+
+	if len(options.buildVolumes.GetMap()) > 0 {
+		return fmt.Errorf("Volumes aren't supported in docker build. Please use only bind mounts.")
+	}
+
 	buildOptions := types.ImageBuildOptions{
 		Memory:         memory,
 		MemorySwap:     memorySwap,
@@ -265,6 +284,7 @@ func runBuild(dockerCli *client.DockerCli, options buildOptions) error {
 		BuildArgs:      runconfigopts.ConvertKVStringsToMap(options.buildArgs.GetAll()),
 		AuthConfigs:    dockerCli.RetrieveAuthConfigs(),
 		Labels:         runconfigopts.ConvertKVStringsToMap(options.labels),
+		Binds:          binds,
 	}
 
 	response, err := dockerCli.Client().ImageBuild(ctx, body, buildOptions)

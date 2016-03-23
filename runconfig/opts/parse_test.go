@@ -857,7 +857,7 @@ func TestVolumeSplitN(t *testing.T) {
 		// Cover directories with one-character name
 		{`/tmp/x/y:/foo/x/y`, -1, []string{`/tmp/x/y`, `/foo/x/y`}},
 	} {
-		res := volumeSplitN(x.input, x.n)
+		res := VolumeSplitN(x.input, x.n)
 		if len(res) < len(x.expected) {
 			t.Fatalf("input: %v, expected: %v, got: %v", x.input, x.expected, res)
 		}

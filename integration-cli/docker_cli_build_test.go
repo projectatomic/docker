@@ -6721,7 +6721,144 @@ func (s *DockerSuite) TestBuildLabelsOverride(c *check.C) {
 	if res != expected {
 		c.Fatalf("Labels %s, expected %s", res, expected)
 	}
+}
 
+func (s *DockerSuite) TestBuildWithBindMounts(c *check.C) {
+	testRequires(c, DaemonIsLinux)
+	testRequires(c, SameHostDaemon)
+
+	dockerfile := `
+	FROM busybox
+	RUN cat /test/file
+	`
+	tmpDir, err := ioutil.TempDir("", "test")
+	c.Assert(err, check.IsNil)
+	f := filepath.Join(tmpDir, "file")
+	c.Assert(ioutil.WriteFile(f, []byte("foobar"), 0644), check.IsNil)
+
+	cmd := exec.Command(dockerBinary, "build", "-v", tmpDir+":/test/", "-")
+	cmd.Stdin = strings.NewReader(dockerfile)
+	out, _, err := runCommandWithOutput(cmd)
+	c.Assert(err, check.IsNil, check.Commentf(out))
+	c.Assert(out, checker.Contains, "foobar")
+}
+
+func (s *DockerSuite) TestBuildWithBindMountsFile(c *check.C) {
+	testRequires(c, DaemonIsLinux)
+	testRequires(c, SameHostDaemon)
+
+	dockerfile := `
+	FROM busybox
+	RUN cat /file
+	`
+	tmpDir, err := ioutil.TempDir("", "test")
+	c.Assert(err, check.IsNil)
+	f := filepath.Join(tmpDir, "file")
+	c.Assert(ioutil.WriteFile(f, []byte("foobar"), 0644), check.IsNil)
+
+	cmd := exec.Command(dockerBinary, "build", "-v", f+":/file", "-")
+	cmd.Stdin = strings.NewReader(dockerfile)
+	out, _, err := runCommandWithOutput(cmd)
+	c.Assert(err, check.IsNil, check.Commentf(out))
+	c.Assert(out, checker.Contains, "foobar")
+}
+
+func (s *DockerSuite) TestBuildWithBindMountsNoVolume(c *check.C) {
+	dockerfile := `
+	FROM busybox
+	`
+	cmd := exec.Command(dockerBinary, "build", "-v", "/test", "-")
+	cmd.Stdin = strings.NewReader(dockerfile)
+	out, _, err := runCommandWithOutput(cmd)
+	c.Assert(err, check.NotNil, check.Commentf(out))
+	c.Assert(out, checker.Contains, "Volumes aren't supported in docker build. Please use only bind mounts.")
+}
+
+func (s *DockerSuite) TestBuildWithBindMountsNotPersistedFile(c *check.C) {
+	testRequires(c, DaemonIsLinux)
+	testRequires(c, SameHostDaemon)
+
+	dockerfile := `
+	FROM busybox
+	RUN cat /file
+	`
+	tmpDir, err := ioutil.TempDir("", "test")
+	c.Assert(err, check.IsNil)
+	f := filepath.Join(tmpDir, "file")
+	c.Assert(ioutil.WriteFile(f, []byte("foobar"), 0644), check.IsNil)
+
+	cmd := exec.Command(dockerBinary, "build", "-v", f+":/file", "-t", "notpersisted", "-")
+	cmd.Stdin = strings.NewReader(dockerfile)
+	out, _, err := runCommandWithOutput(cmd)
+	c.Assert(err, check.IsNil, check.Commentf(out))
+
+	out, _ = dockerCmd(c, "run", "notpersisted", "cat", "/file")
+	c.Assert(out, check.Not(checker.Contains), "foobar")
+	c.Assert(out, check.Equals, "")
+}
+
+func (s *DockerSuite) TestBuildWithBindMountsNotPersistedDir(c *check.C) {
+	testRequires(c, DaemonIsLinux)
+	testRequires(c, SameHostDaemon)
+
+	dockerfile := `
+	FROM busybox
+	RUN cat /test/file
+	`
+	tmpDir, err := ioutil.TempDir("", "test")
+	c.Assert(err, check.IsNil)
+	f := filepath.Join(tmpDir, "file")
+	c.Assert(ioutil.WriteFile(f, []byte("foobar"), 0644), check.IsNil)
+
+	cmd := exec.Command(dockerBinary, "build", "-t", "notpersisted", "-v", tmpDir+":/test/", "-")
+	cmd.Stdin = strings.NewReader(dockerfile)
+	out, _, err := runCommandWithOutput(cmd)
+	c.Assert(err, check.IsNil, check.Commentf(out))
+
+	out, _, err = dockerCmdWithError("run", "notpersisted", "cat", "/test/file")
+	c.Assert(err, check.NotNil)
+	c.Assert(out, checker.Contains, "cat: can't open '/test/file': No such file or directory")
+}
+
+func (s *DockerSuite) TestBuildWithBindMountsReadOnlyDefault(c *check.C) {
+	testRequires(c, DaemonIsLinux)
+	testRequires(c, SameHostDaemon)
+
+	dockerfile := `
+	FROM busybox
+	RUN echo "test" > /test/file
+	`
+	tmpDir, err := ioutil.TempDir("", "test")
+	c.Assert(err, check.IsNil)
+	f := filepath.Join(tmpDir, "file")
+	c.Assert(ioutil.WriteFile(f, []byte("foobar"), 0644), check.IsNil)
+
+	cmd := exec.Command(dockerBinary, "build", "-t", "defaultro", "-v", tmpDir+":/test/", "-")
+	cmd.Stdin = strings.NewReader(dockerfile)
+	out, _, err := runCommandWithOutput(cmd)
+	c.Assert(err, check.NotNil, check.Commentf(out))
+	c.Assert(out, checker.Contains, "Read-only file system")
+}
+
+func (s *DockerSuite) TestBuildWithBindMountsWarnOnReadWrite(c *check.C) {
+	testRequires(c, DaemonIsLinux)
+	testRequires(c, SameHostDaemon)
+
+	dockerfile := `
+	FROM busybox
+	RUN cat /test/file
+	`
+	tmpDir, err := ioutil.TempDir("", "test")
+	c.Assert(err, check.IsNil)
+	f := filepath.Join(tmpDir, "file")
+	c.Assert(ioutil.WriteFile(f, []byte("foobar"), 0644), check.IsNil)
+
+	cmd := exec.Command(dockerBinary, "build", "-t", "defaultro", "-v", tmpDir+":/test/:rw,Z", "-")
+	cmd.Stdin = strings.NewReader(dockerfile)
+	out, _, err := runCommandWithOutput(cmd)
+	c.Assert(err, check.IsNil, check.Commentf(out))
+	c.Assert(out, checker.Contains, "it will be changed to read-only")
+	c.Assert(out, checker.Contains, "foobar")
 }
 
 // Test case for #22855
