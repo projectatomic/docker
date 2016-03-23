@@ -6,6 +6,7 @@ import (
 	"bytes"
 	"fmt"
 	"io/ioutil"
+	"math"
 	"net/http"
 	"net/url"
 	"os/user"
@@ -71,7 +72,7 @@ func getUcred(fd int) (*syscall.Ucred, error) {
 }
 
 //Gets the client's loginuid
-func getLoginUID(ucred *syscall.Ucred, fd int) (int, error) {
+func getLoginUID(ucred *syscall.Ucred, fd int) (int64, error) {
 	if _, err := syscall.Getpeername(fd); err != nil {
 		logrus.Errorf("Socket appears to have closed: %v", err)
 		return -1, err
@@ -81,16 +82,18 @@ func getLoginUID(ucred *syscall.Ucred, fd int) (int, error) {
 		logrus.Errorf("Error reading loginuid: %v", err)
 		return -1, err
 	}
-	loginuidInt, err := strconv.Atoi(string(loginuid))
+	loginuidInt, err := strconv.ParseInt(string(loginuid), 10, 64)
 	if err != nil {
 		logrus.Errorf("Failed to convert loginuid to int: %v", err)
+		return -1, err
 	}
 	return loginuidInt, nil
 }
 
 //Given a loginUID, retrieves the current username
-func getpwuid(loginUID int) (string, error) {
-	pwd, err := user.LookupId(strconv.Itoa(loginUID))
+func getpwuid(loginUID uint32) (string, error) {
+	uid := strconv.FormatUint(uint64(loginUID), 10)
+	pwd, err := user.LookupId(uid)
 	if err != nil {
 		logrus.Errorf("Failed to get pwuid struct: %v", err)
 		return "", err
@@ -171,7 +174,7 @@ func (s *Server) LogAction(w http.ResponseWriter, r *http.Request) error {
 	var (
 		message  string
 		username string
-		loginuid = -1
+		loginuid int64 = -1
 	)
 
 	action, c := s.parseRequest(r)
@@ -213,13 +216,11 @@ func (s *Server) LogAction(w http.ResponseWriter, r *http.Request) error {
 			break
 		}
 		message = fmt.Sprintf("LoginUID=%v, %s", loginuid, message)
-		if uint32(loginuid) == 0xffffffff { // -1 means no login user
-			//No login UID is set, so no point in looking up a name
+		if loginuid < 0 || loginuid > math.MaxUint32 {
 			break
 		}
-
 		//Get username
-		username, err = getpwuid(loginuid)
+		username, err = getpwuid(uint32(loginuid))
 		if err != nil {
 			break
 		}
@@ -251,7 +252,7 @@ func (s *Server) LogAction(w http.ResponseWriter, r *http.Request) error {
 }
 
 //Logs an API event to the audit log
-func logAuditlog(c *daemon.Container, action string, username string, loginuid int, success bool) {
+func logAuditlog(c *daemon.Container, action string, username string, loginuid int64, success bool) {
 	switch action {
 	case "start":
 	case "stop":
