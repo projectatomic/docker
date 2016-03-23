@@ -36,6 +36,7 @@ import (
 	"github.com/docker/docker/pkg/tarsum"
 	"github.com/docker/docker/pkg/urlutil"
 	"github.com/docker/docker/runconfig/opts"
+	volumePkg "github.com/docker/docker/volume"
 )
 
 func (b *Builder) commit(id string, autoCmd strslice.StrSlice, comment string) error {
@@ -448,7 +449,7 @@ func (b *Builder) processImageFrom(img builder.Image) error {
 // If there is any error, it returns `(false, err)`.
 func (b *Builder) probeCache() (bool, error) {
 	c := b.imageCache
-	if c == nil || b.options.NoCache || b.cacheBusted {
+	if c == nil || b.options.NoCache || b.cacheBusted || len(b.options.Binds) != 0 {
 		return false, nil
 	}
 	cache, err := c.GetCache(b.image, b.runConfig)
@@ -486,6 +487,39 @@ func (b *Builder) create() (string, error) {
 		Ulimits:      b.options.Ulimits,
 	}
 
+	// ensure no rw flag is passed in bind-mounts.
+	// if it is just warn it's ignored
+	// and eventually build will fail itself trying to write to ro bind mounts
+	// also change everything to :ro
+	var warnings []string
+	for i, bind := range b.options.Binds {
+		arr := strings.Split(bind, ":")
+		switch len(arr) {
+		case 2:
+			b.options.Binds[i] = strings.Join([]string{arr[0], arr[1], "ro"}, ":")
+			break
+		case 3:
+			if volumePkg.ReadWrite(arr[2]) {
+				warnings = append(warnings, fmt.Sprintf("bind mount mode is read-write for %s, it will be changed to read-only", bind))
+				mode := "ro"
+				for _, o := range strings.Split(arr[2], ",") {
+					if o == "rw" {
+						continue
+					}
+					mode = mode + "," + o
+				}
+				b.options.Binds[i] = strings.Join([]string{arr[0], arr[1], mode}, ":")
+			}
+			break
+		default:
+			// just skip, run will validate them all...
+		}
+	}
+
+	for _, warning := range warnings {
+		fmt.Fprintf(b.Stdout, " ---> [Warning] %s\n", warning)
+	}
+
 	// TODO: why not embed a hostconfig in builder?
 	hostConfig := &container.HostConfig{
 		SecurityOpt: b.options.SecurityOpt,
@@ -495,6 +529,7 @@ func (b *Builder) create() (string, error) {
 		NetworkMode: container.NetworkMode(b.options.NetworkMode),
 		// Set a log config to override any default value set on the daemon
 		LogConfig: defaultLogConfig,
+		Binds:     b.options.Binds,
 	}
 
 	config := *b.runConfig

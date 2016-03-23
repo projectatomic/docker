@@ -175,6 +175,7 @@ type ImageBuildOptions struct {
 	// specified here do not need to have a valid parent chain to match cache.
 	CacheFrom   []string
 	SecurityOpt []string
+	Binds       []string
 }
 
 // ImageBuildResponse holds information

@@ -56,6 +56,7 @@ Options:
       --squash                  Squash newly built layers into a single new layer (**Experimental Only**)
   -t, --tag value               Name and optionally a tag in the 'name:tag' format (default [])
       --ulimit value            Ulimit options (default [])
+      --v, --volume=[]          Set build-time bind mounts
 ```
 
 ## Description
