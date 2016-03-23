@@ -93,6 +93,15 @@ func newImageBuildOptions(ctx context.Context, r *http.Request) (*types.ImageBui
 		options.Labels = labels
 	}
 
+	var buildBinds = []string{}
+	buildBindsJSON := r.FormValue("buildbinds")
+	if buildBindsJSON != "" {
+		if err := json.NewDecoder(strings.NewReader(buildBindsJSON)).Decode(&buildBinds); err != nil {
+			return nil, err
+		}
+		options.Binds = buildBinds
+	}
+
 	return options, nil
 }
 

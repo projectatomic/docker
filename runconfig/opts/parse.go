@@ -336,8 +336,8 @@ func Parse(flags *pflag.FlagSet, copts *ContainerOptions) (*container.Config, *c
 	var binds []string
 	// add any bind targets to the list of container volumes
 	for bind := range copts.flVolumes.GetMap() {
-		if arr := volumeSplitN(bind, 2); len(arr) > 1 {
-			// after creating the bind mount we want to delete it from the copts.flVolumes values because
+		if arr := VolumeSplitN(bind, 2); len(arr) > 1 {
+			// after creating the bind mount we want to delete it from the flVolumes values because
 			// we do not want bind mounts being committed to image configs
 			binds = append(binds, bind)
 			copts.flVolumes.Delete(bind)
@@ -887,14 +887,14 @@ func validatePath(val string, validator func(string) bool) (string, error) {
 	return val, nil
 }
 
-// volumeSplitN splits raw into a maximum of n parts, separated by a separator colon.
+// VolumeSplitN splits raw into a maximum of n parts, separated by a separator colon.
 // A separator colon is the last `:` character in the regex `[:\\]?[a-zA-Z]:` (note `\\` is `\` escaped).
 // In Windows driver letter appears in two situations:
 // a. `^[a-zA-Z]:` (A colon followed  by `^[a-zA-Z]:` is OK as colon is the separator in volume option)
 // b. A string in the format like `\\?\C:\Windows\...` (UNC).
 // Therefore, a driver letter can only follow either a `:` or `\\`
 // This allows to correctly split strings such as `C:\foo:D:\:rw` or `/tmp/q:/foo`.
-func volumeSplitN(raw string, n int) []string {
+func VolumeSplitN(raw string, n int) []string {
 	var array []string
 	if len(raw) == 0 || raw[0] == ':' {
 		// invalid

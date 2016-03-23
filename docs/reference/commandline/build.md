@@ -41,6 +41,7 @@ Options:
                                 or `g` (gigabytes). If you omit the unit, the system uses bytes.
   -t, --tag value               Name and optionally a tag in the 'name:tag' format (default [])
       --ulimit value            Ulimit options (default [])
+      --v, --volume=[]          Set build-time bind mounts
 ```
 
 Builds Docker images from a Dockerfile and a "context". A build's context is
