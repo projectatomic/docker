@@ -65,6 +65,8 @@ func (cli *DockerCli) CmdBuild(args ...string) error {
 	flLabels := opts.NewListOpts(nil)
 	cmd.Var(&flLabels, []string{"-label"}, "Set metadata for an image")
 
+	flBuildVolumes := opts.NewListOpts(nil)
+	cmd.Var(&flBuildVolumes, []string{"v", "-volume"}, "Set build-time bind mounts")
 	ulimits := make(map[string]*units.Ulimit)
 	flUlimits := runconfigopts.NewUlimitOpt(&ulimits)
 	cmd.Var(flUlimits, []string{"-ulimit"}, "Ulimit options")
@@ -211,6 +213,21 @@ func (cli *DockerCli) CmdBuild(args ...string) error {
 		}
 	}
 
+	var binds []string
+	// add any bind targets to the list of container volumes
+	for bind := range flBuildVolumes.GetMap() {
+		if arr := runconfigopts.VolumeSplitN(bind, 2); len(arr) > 1 {
+			// after creating the bind mount we want to delete it from the flBuildVolumes values because
+			// we do not want bind mounts being committed to image configs
+			binds = append(binds, bind)
+			flBuildVolumes.Delete(bind)
+		}
+	}
+
+	if len(flBuildVolumes.GetMap()) > 0 {
+		return fmt.Errorf("Volumes aren't supported in docker build. Please use only bind mounts.")
+	}
+
 	options := types.ImageBuildOptions{
 		Context:        body,
 		Memory:         memory,
@@ -234,6 +251,7 @@ func (cli *DockerCli) CmdBuild(args ...string) error {
 		BuildArgs:      runconfigopts.ConvertKVStringsToMap(flBuildArg.GetAll()),
 		AuthConfigs:    cli.retrieveAuthConfigs(),
 		Labels:         runconfigopts.ConvertKVStringsToMap(flLabels.GetAll()),
+		Binds:          binds,
 	}
 
 	response, err := cli.client.ImageBuild(context.Background(), options)
