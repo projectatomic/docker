@@ -23,12 +23,14 @@ import (
 	"github.com/docker/docker/pkg/tailfile"
 	"github.com/docker/docker/pkg/timeutils"
 	"github.com/docker/docker/pkg/units"
+	"github.com/opencontainers/runc/libcontainer/label"
 )
 
 const (
 	// Name is the name of the file that the jsonlogger logs to.
 	Name               = "json-file"
 	maxJSONDecodeRetry = 10
+	logLabel           = "system_u:object_r:docker_log_t:s0"
 )
 
 // JSONFileLogger is Logger implementation for default Docker logging.
@@ -60,6 +62,7 @@ func New(ctx logger.Context) (logger.Logger, error) {
 	if err != nil {
 		return nil, err
 	}
+	label.Relabel(ctx.LogPath, logLabel, true)
 	var capval int64 = -1
 	if capacity, ok := ctx.Config["max-size"]; ok {
 		var err error
@@ -143,6 +146,7 @@ func writeLog(l *JSONFileLogger) (int64, error) {
 		if err != nil {
 			return -1, err
 		}
+		label.Relabel(name, logLabel, true)
 		l.f = file
 		l.notifyRotate.Publish(struct{}{})
 	}
