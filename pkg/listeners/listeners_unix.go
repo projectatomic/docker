@@ -36,7 +36,7 @@ func Init(proto, addr, socketGroup string, tlsConfig *tls.Config) ([]net.Listene
 		if err != nil {
 			return nil, fmt.Errorf("can't create unix socket %s: %v", addr, err)
 		}
-		ls = append(ls, l)
+		ls = append(ls, &MalformedHostHeaderOverride{l})
 	default:
 		return nil, fmt.Errorf("invalid protocol format: %q", proto)
 	}
