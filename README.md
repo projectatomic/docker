@@ -2,6 +2,10 @@
 Red Hat is carrying a series of experimental patches that we feel are required
 for our customers or for our support engineering.
 
+#### BACKPORT:-Add-support-for-setting-sysctls.patch
+
+https://github.com/docker/docker/pull/19265
+
 #### BACKPORT:-Fix-compilation-errors-with-btrfs-progs-4.5.patch
 
 https://github.com/docker/docker/pull/21723
