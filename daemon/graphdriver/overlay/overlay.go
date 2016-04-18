@@ -18,6 +18,7 @@ import (
 	"github.com/docker/docker/pkg/archive"
 	"github.com/docker/docker/pkg/chrootarchive"
 	"github.com/docker/docker/pkg/idtools"
+	"github.com/docker/docker/pkg/mount"
 
 	"github.com/opencontainers/runc/libcontainer/label"
 )
@@ -142,6 +143,10 @@ func Init(home string, options []string, uidMaps, gidMaps []idtools.IDMap) (grap
 		return nil, err
 	}
 
+	if err := mount.MakePrivate(home); err != nil {
+		return nil, err
+	}
+
 	d := &Driver{
 		home:      home,
 		pathCache: make(map[string]string),
@@ -217,7 +222,7 @@ func (d *Driver) GetMetadata(id string) (map[string]string, error) {
 // Cleanup simply returns nil and do not change the existing filesystem.
 // This is required to satisfy the graphdriver.Driver interface.
 func (d *Driver) Cleanup() error {
-	return nil
+	return mount.Unmount(d.home)
 }
 
 // Create is used to create the upper, lower, and merge directories required for overlay fs for a given id.
