@@ -21,6 +21,7 @@
       "  libguestfs-tools \\",
       "  make \\",
       "  mingw64-gcc \\",
+      "  mingw64-winpthreads-static \\",
       "  net-tools \\",
       "  php-devel \\",
       "  procps-ng \\",

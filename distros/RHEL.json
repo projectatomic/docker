@@ -21,6 +21,7 @@
       "  libguestfs-tools \\",
       "  make \\",
       "  mingw64-gcc \\",
+      "  mingw64-winpthreads-static \\",
       "  php-devel \\",
       "  python-websocket-client \\",
       "  python-requests \\",
