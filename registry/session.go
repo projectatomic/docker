@@ -325,7 +325,7 @@ func isEndpointURLBlocked(endpoint string) bool {
 }
 
 func isEndpointBlocked(endpoint APIEndpoint) bool {
-	return isEndpointURLBlocked(endpoint.URL.Host)
+	return isEndpointURLBlocked(endpoint.URL.String())
 }
 
 func filterBlockedEndpoints(endpoints []APIEndpoint) []APIEndpoint {
