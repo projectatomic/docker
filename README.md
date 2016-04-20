@@ -2,6 +2,73 @@
 Red Hat is carrying a series of experimental patches that we feel are required
 for our customers or for our support engineering.
 
+#### BACKPORT:-Mount-volumes-rprivate-for-archival-and-other-use-cases.patch
+
+https://github.com/docker/docker/pull/22009
+
+#### BACKPORT:-Make-overlay-home-dir-Private-Mount.patch
+
+https://github.com/docker/docker/pull/22069
+
+#### Ignore-invalid-host-header-between-go1.6-and-old-docker-clients.patch
+
+https://bugzilla.redhat.com/show_bug.cgi?id=1324150
+https://github.com/docker/docker/pull/22000
+https://github.com/docker/docker/issues/20865
+https://github.com/docker/docker/pull/21423
+
+#### The-following-syscalls-should-not-be-blocked-by-seccomp.patch
+
+Capabilities block these syscalls.
+
+mount, umount2, unshare, reboot and name\_to\_handle\_at are all needed to
+run systemd as pid1 in a container, they work fine with sys\_admin disabled
+and have functionality in the kernel that is available to a non privileged
+process.  There is no easy way to discover which syscalls are blocked, so
+we end up more likely with the user doing a --privileged.
+
+With UserNamespace we want to allow users to potentially setup unshare additional
+namespaces.
+
+man reboot
+...
+Behavior inside PID namespaces
+Since Linux 3.4, when reboot() is called from a PID namespace (see
+		pid_namespaces(7)) other than the initial PID namespace, the effect
+		of the call is to send a signal to the namespace "init" process.
+		LINUX_REBOOT_CMD_RESTART and LINUX_REBOOT_CMD_RESTART2 cause a SIGHUP
+		signal to be sent.  LINUX_REBOOT_CMD_POWER_OFF and
+		LINUX_REBOOT_CMD_HALT cause a SIGINT signal to be sent.
+
+https://github.com/docker/docker/pull/21287
+
+#### Add-dockerhooks-exec-custom-hooks-for-prestart/poststop-containers.patch
+
+With the addition of runc/hooks support we want to add a feature
+to allow third parties to run helper programs before a docker container
+gets started and just after the container finishes.
+
+For example we want to add a RegisterMachine hook.
+
+For systems that support systemd/RegisterMachine, this hook would register
+a machine to the machinectl.  machinectl could then list docker containers
+along with other virtulization environments like kvm, and systemd-nspawn
+containers. Overtime we would want to implement other machinectl features
+to get docker containers better integrated into the system and machinectl.
+
+Another example of a dockerhook might be for people wanting to do better logging
+of starting and stopping of containers.  For example have a log agent that
+records when a container starts and stops and then sends a message to a
+monitoring station.
+
+Dockerhooks reads directory in either /usr/lib/docker/hooks.d or
+/usr/libexec/docker/hooks.d to search for hooks, if the directory exists
+docker will execute the executables in this directory via runc/libcontainer i
+using PreStart and PostStop.  It will also send the config.json file as the
+second paramater.
+
+https://github.com/docker/docker/pull/17021
+
 #### Return-rpm-version-of-packages-in-docker-version.patch
 
 Red Hat Support wants to know the version of the rpm package that docker
@@ -49,14 +116,6 @@ content.
 
 https://github.com/docker/docker/pull/11991
 https://github.com/docker/docker/pull/10411
-
-#### Confirm-a-push-to-public-Docker-registry.patch
-
-Red Hat content is not supposed to be shared with other customers. For example
-RHE7 and RHEL6 base images are not supposed to be shared with a public registry.
-Pushing content to the docker registry breaks the subscription agreement with
-Red Hat. The patch helps prevent customers from accidentally pushing,
-`docker push`, RHEL content to docker.io
 
 #### Improved-searching-experience.patch
 
