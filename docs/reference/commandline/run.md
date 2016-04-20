@@ -82,6 +82,7 @@ parent = "smn_cli"
       --security-opt=[]             Security Options
       --sig-proxy=true              Proxy received signals to the process
       --stop-signal="SIGTERM"       Signal to stop a container
+      --sysctl[=*[]*]]              Configure namespaced kernel parameters at runtime
       -t, --tty                     Allocate a pseudo-TTY
       -u, --user=""                 Username or UID (format: <name|uid>[:<group|gid>])
       --ulimit=[]                   Ulimit options
@@ -607,3 +608,30 @@ If you have set the `--exec-opt isolation=hyperv` option on the Docker `daemon`,
 $ docker run -d --isolation default busybox top
 $ docker run -d --isolation hyperv busybox top
 ```
+
+### Configure namespaced kernel parameters (sysctls) at runtime
+
+The `--sysctl` sets namespaced kernel parameters (sysctls) in the
+container. For example, to turn on IP forwarding in the containers
+network namespace, run this command:
+
+    $ docker run --sysctl net.ipv4.ip_forward=1 someimage
+
+
+> **Note**: Not all sysctls are namespaced. docker does not support changing sysctls
+> inside of a container that also modify the host system. As the kernel 
+> evolves we expect to see more sysctls become namespaced.
+
+#### Currently supported sysctls
+
+  `IPC Namespace`:
+
+  kernel.msgmax, kernel.msgmnb, kernel.msgmni, kernel.sem, kernel.shmall, kernel.shmmax, kernel.shmmni, kernel.shm_rmid_forced
+  Sysctls beginning with fs.mqueue.*
+
+  If you use the `--ipc=host` option these sysctls will not be allowed.
+
+  `Network Namespace`:
+      Sysctls beginning with net.*
+
+  If you use the `--net=host` option using these sysctls will not be allowed.

@@ -271,6 +271,7 @@ func (daemon *Daemon) populateCommand(c *container.Container, env []string) erro
 		SeccompProfile:     c.SeccompProfile,
 		UIDMapping:         uidMap,
 		UTS:                uts,
+		Sysctls:            c.HostConfig.Sysctls,
 	}
 	if c.HostConfig.CgroupParent != "" {
 		c.Command.CgroupParent = c.HostConfig.CgroupParent

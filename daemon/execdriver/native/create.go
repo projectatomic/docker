@@ -77,6 +77,7 @@ func (d *Driver) createContainer(c *execdriver.Command, hooks execdriver.Hooks) 
 			container.Seccomp = getDefaultSeccompProfile()
 		}
 	}
+	container.Sysctl = c.Sysctls
 	// add CAP_ prefix to all caps for new libcontainer update to match
 	// the spec format.
 	for i, s := range container.Capabilities {
