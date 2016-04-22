@@ -42,6 +42,10 @@ https://github.com/docker/docker/pull/22009
 
 https://github.com/docker/docker/pull/22069
 
+#### BACKPORT:-Properly-expand-systemd-slice-names.patch
+
+https://github.com/opencontainers/runc/pull/511
+
 #### Ignore-invalid-host-header-between-go1.6-and-old-docker-clients.patch
 
 https://bugzilla.redhat.com/show_bug.cgi?id=1324150
