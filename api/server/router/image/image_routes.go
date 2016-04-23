@@ -374,11 +374,6 @@ func (s *imageRouter) getAuthConfigs(ref reference.Named, r *http.Request, backw
 			// to increase compatibility with the existing api it is defaulting to be empty
 			authConfigs = make(map[string]types.AuthConfig)
 		}
-	} else if backward {
-		// the old format is supported for compatibility if there was no authConfig header
-		if err := json.NewDecoder(r.Body).Decode(&authConfigs); err != nil {
-			return nil, fmt.Errorf("Bad parameters and missing X-Registry-Auth: %v", err)
-		}
 	}
 	// maybe client just sends one auth config
 	// try to resolve just one auth config...
