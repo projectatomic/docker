@@ -2,6 +2,7 @@ package daemon
 
 import (
 	"runtime"
+	"sort"
 
 	"github.com/Sirupsen/logrus"
 	"github.com/docker/docker/container"
@@ -135,13 +136,12 @@ func (daemon *Daemon) containerStart(container *container.Container) (err error)
 		}
 	}
 
-	mounts, err := daemon.setupMounts(container)
+	ms, err := daemon.setupMounts(container)
 	if err != nil {
 		return err
 	}
-	mounts = append(mounts, container.IpcMounts()...)
-	mounts = append(mounts, container.TmpfsMounts()...)
-
+	ms = append(ms, container.IpcMounts()...)
+	ms = append(ms, container.TmpfsMounts()...)
 	rootUID, rootGID := daemon.GetRemappedUIDGID()
 	m, err := container.SecretMount(rootUID, rootGID)
 	if err != nil {
@@ -150,10 +150,10 @@ func (daemon *Daemon) containerStart(container *container.Container) (err error)
 	// SecretMount() returns m == nil && err == nil
 	// we check m before appending and dereferencing it
 	if m != nil {
-		mounts = append([]execdriver.Mount{*m}, mounts...)
+		ms = append([]execdriver.Mount{*m}, ms...)
 	}
-
-	container.Command.Mounts = mounts
+	sort.Sort(mounts(ms))
+	container.Command.Mounts = ms
 
 	jsonPath, err := container.ConfigPath()
 	if err != nil {
