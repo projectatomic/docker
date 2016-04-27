@@ -5,6 +5,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"sort"
 	"strconv"
 	"strings"
 
@@ -636,13 +637,12 @@ func (daemon *Daemon) createSpec(c *container.Container) (*libcontainerd.Spec, e
 		return nil, err
 	}
 
-	mounts, err := daemon.setupMounts(c)
+	ms, err := daemon.setupMounts(c)
 	if err != nil {
 		return nil, err
 	}
-	mounts = append(mounts, c.IpcMounts()...)
-	mounts = append(mounts, c.TmpfsMounts()...)
-
+	ms = append(ms, c.IpcMounts()...)
+	ms = append(ms, c.TmpfsMounts()...)
 	rootUID, rootGID := daemon.GetRemappedUIDGID()
 	m, err := c.SecretMount(rootUID, rootGID)
 	if err != nil {
@@ -651,10 +651,10 @@ func (daemon *Daemon) createSpec(c *container.Container) (*libcontainerd.Spec, e
 	// SecretMount() returns m == nil && err == nil
 	// we check m before appending and dereferencing it
 	if m != nil {
-		mounts = append(mounts, *m)
+		ms = append(ms, *m)
 	}
-
-	if err := setMounts(daemon, &s, c, mounts); err != nil {
+	sort.Sort(mounts(ms))
+	if err := setMounts(daemon, &s, c, ms); err != nil {
 		return nil, fmt.Errorf("linux mounts: %v", err)
 	}
 
