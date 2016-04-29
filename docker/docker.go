@@ -3,6 +3,8 @@ package main
 import (
 	"fmt"
 	"os"
+	"os/signal"
+	"syscall"
 
 	"github.com/Sirupsen/logrus"
 	"github.com/docker/docker/api/client"
@@ -18,6 +20,14 @@ func main() {
 	if reexec.Init() {
 		return
 	}
+
+	go func() {
+		c := make(chan os.Signal, 2048)
+		signal.Notify(c, os.Signal(syscall.SIGPIPE))
+		for {
+			<- c
+		}
+	}()
 
 	// Set terminal emulation based on platform as required.
 	stdin, stdout, stderr := term.StdStreams()
