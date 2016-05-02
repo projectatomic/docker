@@ -25,6 +25,7 @@ import (
 	"github.com/docker/libnetwork/netutils"
 	"github.com/docker/libnetwork/resolvconf"
 	"github.com/go-check/check"
+	libcontainerUser "github.com/opencontainers/runc/libcontainer/user"
 )
 
 // "test123" should be printed by docker run
@@ -666,7 +667,7 @@ func (s *DockerSuite) TestRunUserByIDBig(c *check.C) {
 	if err == nil {
 		c.Fatal("No error, but must be.", out)
 	}
-	if !strings.Contains(out, "Uids and gids must be in range") {
+	if !strings.Contains(out, libcontainerUser.ErrRange.Error()) {
 		c.Fatalf("expected error about uids range, got %s", out)
 	}
 }
@@ -679,7 +680,7 @@ func (s *DockerSuite) TestRunUserByIDNegative(c *check.C) {
 	if err == nil {
 		c.Fatal("No error, but must be.", out)
 	}
-	if !strings.Contains(out, "Uids and gids must be in range") {
+	if !strings.Contains(out, libcontainerUser.ErrRange.Error()) {
 		c.Fatalf("expected error about uids range, got %s", out)
 	}
 }
