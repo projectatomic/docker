@@ -239,16 +239,8 @@ func (s *Server) LogAction(w http.ResponseWriter, r *http.Request) error {
 	// Log info messages at Debug Level
 	// Log messages that change state at Info level
 	switch action {
-	case "info":
-	case "images":
-	case "version":
-	case "json":
-	case "search":
-	case "stats":
-	case "events":
-	case "history":
+	case "history", "events", "stats", "search", "json", "version", "images", "info":
 		logrus.Debug(message)
-		fallthrough
 	default:
 		logrus.Info(message)
 		logAuditlog(c, action, username, loginuid, true)
