@@ -842,3 +842,55 @@ func (s *DockerRegistriesSuite) TestPushNeedsAuth(c *check.C) {
 		c.Fatalf("Wanted %s, got %s", expected, out)
 	}
 }
+
+func (s *DockerRegistrySuite) TestPushWithSkipSchema2(c *check.C) {
+	c.Assert(s.d.StartWithBusybox("--skip-schema2-push=false"), check.IsNil)
+
+	repo := fmt.Sprintf("%s/runcom/busybox", s.reg.url)
+	out, err := s.d.Cmd("tag", "busybox", repo)
+	c.Assert(err, check.IsNil, check.Commentf(out))
+
+	out, err = s.d.Cmd("push", repo)
+	c.Assert(err, check.IsNil, check.Commentf(out))
+
+	digest1 := reference.DigestRegexp.FindString(out)
+	c.Assert(len(digest1), checker.GreaterThan, 0, check.Commentf("no digest found for pushed manifest"))
+
+	out, err = s.d.Cmd("pull", repo+"@"+digest1)
+	c.Assert(err, check.IsNil, check.Commentf(out))
+
+	out, err = s.d.Cmd("rmi", "-f", repo+"@"+digest1)
+	c.Assert(err, check.IsNil, check.Commentf(out))
+
+	c.Assert(s.d.Restart("--skip-schema2-push=true"), check.IsNil)
+
+	out, err = s.d.Cmd("push", repo)
+	c.Assert(err, check.IsNil, check.Commentf(out))
+
+	digest2 := reference.DigestRegexp.FindString(out)
+	c.Assert(len(digest2), checker.GreaterThan, 0, check.Commentf("no digest found for pushed manifest"))
+
+	out, err = s.d.Cmd("pull", repo+"@"+digest2)
+	c.Assert(err, check.IsNil, check.Commentf(out))
+
+	out, err = s.d.Cmd("rmi", "-f", repo+"@"+digest2)
+	c.Assert(err, check.IsNil, check.Commentf(out))
+
+	c.Assert(digest1, check.Not(checker.Equals), digest2)
+
+	c.Assert(s.d.Restart(), check.IsNil)
+
+	out, err = s.d.Cmd("push", repo)
+	c.Assert(err, check.IsNil, check.Commentf(out))
+
+	digest3 := reference.DigestRegexp.FindString(out)
+	c.Assert(len(digest3), checker.GreaterThan, 0, check.Commentf("no digest found for pushed manifest"))
+
+	out, err = s.d.Cmd("pull", repo+"@"+digest3)
+	c.Assert(err, check.IsNil, check.Commentf(out))
+
+	out, err = s.d.Cmd("rmi", "-f", repo+"@"+digest3)
+	c.Assert(err, check.IsNil, check.Commentf(out))
+
+	c.Assert(digest1, checker.Equals, digest3)
+}
