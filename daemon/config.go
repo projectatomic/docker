@@ -97,6 +97,7 @@ type CommonConfig struct {
 	LiveRestore          bool                `json:"live-restore,omitempty"`
 	BlockedRegistries    []string            `json:"block-registry,omitempty"`
 	AdditionalRegistries []string            `json:"add-registry,omitempty"`
+	SkipSchemaV2Push     bool                `json:"skip-schema2-push"`
 
 	// ClusterStore is the storage backend used for the cluster information. It is used by both
 	// multihost networking (to store networks and endpoints information) and by the node discovery
@@ -174,6 +175,7 @@ func (config *Config) InstallCommonFlags(cmd *flag.FlagSet, usageFn func(string)
 
 	cmd.Var(opts.NewListOptsRef(&config.BlockedRegistries, registry.ValidateIndexName), []string{"-block-registry"}, usageFn("Don't contact given registry"))
 	cmd.Var(opts.NewListOptsRef(&config.AdditionalRegistries, registry.ValidateIndexName), []string{"-add-registry"}, usageFn("Registry to query before a public one"))
+	cmd.BoolVar(&config.SkipSchemaV2Push, []string{"#-skip-schema2-push"}, false, usageFn("override push behavior to push only schema1 manifests"))
 }
 
 // IsValueSet returns true if a configuration value
