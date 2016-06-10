@@ -392,9 +392,13 @@ func (store *TagStore) SetDigest(repoName, digest, imageName string, keepUnquali
 	if !exists {
 		repoRefs = Repository{}
 		store.Repositories[normalized] = repoRefs
-	} else if oldID, exists := repoRefs[digest]; exists && oldID != img.ID {
-		return fmt.Errorf("Conflict: Digest %s is already set to image %s", digest, oldID)
 	}
+	// Disabled because of https://bugzilla.redhat.com/show_bug.cgi?id=1322762
+	/*
+		else if oldID, exists := repoRefs[digest]; exists && oldID != img.ID {
+			return fmt.Errorf("Conflict: Digest %s is already set to image %s", digest, oldID)
+		}
+	*/
 
 	repoRefs[digest] = img.ID
 	return store.save()
