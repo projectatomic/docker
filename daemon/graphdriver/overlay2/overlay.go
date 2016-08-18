@@ -10,7 +10,6 @@ import (
 	"os"
 	"os/exec"
 	"path"
-	"strconv"
 	"strings"
 	"syscall"
 
@@ -22,8 +21,6 @@ import (
 	"github.com/docker/docker/pkg/directory"
 	"github.com/docker/docker/pkg/idtools"
 	"github.com/docker/docker/pkg/mount"
-	"github.com/docker/docker/pkg/parsers"
-	"github.com/docker/docker/pkg/parsers/kernel"
 
 	"github.com/opencontainers/runc/libcontainer/label"
 )
@@ -94,25 +91,8 @@ func init() {
 // If overlay filesystem is not supported on the host, graphdriver.ErrNotSupported is returned as error.
 // If a overlay filesystem is not supported over a existing filesystem then error graphdriver.ErrIncompatibleFS is returned.
 func Init(home string, options []string, uidMaps, gidMaps []idtools.IDMap) (graphdriver.Driver, error) {
-	opts, err := parseOptions(options)
-	if err != nil {
-		return nil, err
-	}
-
 	if err := supportsOverlay(); err != nil {
 		return nil, graphdriver.ErrNotSupported
-	}
-
-	// require kernel 4.0.0 to ensure multiple lower dirs are supported
-	v, err := kernel.GetKernelVersion()
-	if err != nil {
-		return nil, err
-	}
-	if kernel.CompareKernelVersion(*v, kernel.VersionInfo{Kernel: 4, Major: 0, Minor: 0}) < 0 {
-		if !opts.overrideKernelCheck {
-			return nil, graphdriver.ErrNotSupported
-		}
-		logrus.Warnf("Using pre-4.0.0 kernel for overlay2, mount failures may require kernel update")
 	}
 
 	fsMagic, err := graphdriver.GetFSMagic(home)
@@ -155,27 +135,6 @@ func Init(home string, options []string, uidMaps, gidMaps []idtools.IDMap) (grap
 
 type overlayOptions struct {
 	overrideKernelCheck bool
-}
-
-func parseOptions(options []string) (*overlayOptions, error) {
-	o := &overlayOptions{}
-	for _, option := range options {
-		key, val, err := parsers.ParseKeyValueOpt(option)
-		if err != nil {
-			return nil, err
-		}
-		key = strings.ToLower(key)
-		switch key {
-		case "overlay2.override_kernel_check":
-			o.overrideKernelCheck, err = strconv.ParseBool(val)
-			if err != nil {
-				return nil, err
-			}
-		default:
-			return nil, fmt.Errorf("overlay2: Unknown option %s\n", key)
-		}
-	}
-	return o, nil
 }
 
 func supportsOverlay() error {
