@@ -6,6 +6,11 @@ import (
 	"path/filepath"
 )
 
+const (
+	baseDir     = "/usr/share/rhel/secrets"
+	overrideDir = "/etc/container/rhel/secrets"
+)
+
 // Secret info
 type Secret struct {
 	Name      string
@@ -81,5 +86,8 @@ func readFile(root, name string) ([]SecretData, error) {
 }
 
 func getHostSecretData() ([]SecretData, error) {
-	return readAll("/usr/share/rhel/secrets", "")
+	if _, err := os.Stat(overrideDir); err == nil {
+		return readAll(overrideDir, "")
+	}
+	return readAll(baseDir, "")
 }
