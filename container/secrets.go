@@ -1,6 +1,7 @@
 package container
 
 import (
+	"fmt"
 	"io/ioutil"
 	"os"
 	"path/filepath"
@@ -81,5 +82,16 @@ func readFile(root, name string) ([]SecretData, error) {
 }
 
 func getHostSecretData() ([]SecretData, error) {
-	return readAll("/usr/share/rhel/secrets", "")
+	baseDir := "/usr/share/rhel/secrets"
+	overrideDir := "/etc/containers/secrets"
+
+	baseSecrets, err := readAll(baseDir, "")
+	if err != nil {
+		return nil, fmt.Errorf("Failed to read secrets from %s: %s\n", baseDir, err.Error())
+	}
+	overrideSecrets, err := readAll(overrideDir, "")
+	if err != nil {
+		return nil, fmt.Errorf("Failed to read secrets from %s: %s\n", overrideDir, err.Error())
+	}
+	return append(baseSecrets, overrideSecrets...), nil
 }
