@@ -28,7 +28,7 @@ import (
 	"github.com/docker/docker/registry"
 )
 
-const maxRepositoryMountAttempts = 3
+const maxRepositoryMountAttempts = 4
 
 // PushResult contains the tag, manifest digest, and manifest size from the
 // push. It's used to signal this information to the trust code in the client
@@ -395,9 +395,10 @@ func (pd *v2PushDescriptor) Upload(ctx context.Context, progressOutput progress.
 			pd.v2MetadataService.Remove(mountCandidate)
 		}
 
-		layerUpload = lu
-		if layerUpload != nil {
-			break
+		if lu != nil {
+			// cancel previous upload
+			cancelLayerUpload(ctx, mountCandidate.Digest, layerUpload)
+			layerUpload = lu
 		}
 	}
 
@@ -605,4 +606,14 @@ func getPathComponents(path string) []string {
 		}
 	}
 	return strings.Split(path, "/")
+}
+
+func cancelLayerUpload(ctx context.Context, dgst digest.Digest, layerUpload distribution.BlobWriter) {
+	if layerUpload != nil {
+		logrus.Debugf("cancelling upload of blob %s", dgst)
+		err := layerUpload.Cancel(ctx)
+		if err != nil {
+			logrus.Warnf("failed to cancel upload: %v", err)
+		}
+	}
 }
