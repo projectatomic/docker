@@ -504,3 +504,151 @@ func (s *DockerRegistriesSuite) TestPullFromPrivateRegistriesWithPublicBlocked(c
 func (s *DockerRegistriesSuite) TestPullFromAdditionalRegistryWithAllBlocked(c *check.C) {
 	s.doTestPullFromPrivateRegistriesWithPublicBlocked(c, []string{"--block-registry=all"})
 }
+
+func (s *DockerRegistriesSuite) setupSignedImages(c *check.C) {
+	cmd := exec.Command("mkdir", "/root/.gnupg")
+	out, _, err := runCommandWithOutput(cmd)
+	c.Assert(err, checker.IsNil, check.Commentf(out))
+
+	cmd = exec.Command("gpg", "--batch", "--gen-key")
+	cmd.Stdin = strings.NewReader(`Key-Type: RSA
+Name-Real: Personal signing key
+Name-Email: test@redhat.com
+%commit`)
+	out, _, err = runCommandWithOutput(cmd)
+	c.Assert(err, checker.IsNil, check.Commentf(out))
+
+	cmd = exec.Command("gpg", "--armor", "--export", "--output", "/root/personal-pubkey.gpg", "test@redhat.com")
+	out, _, err = runCommandWithOutput(cmd)
+	c.Assert(err, checker.IsNil, check.Commentf(out))
+
+	tmp, err := ioutil.TempDir("", "sigstore-")
+	c.Assert(err, checker.IsNil)
+	sigstorePath := filepath.Join(tmp, "sigstore")
+
+	registriesd := fmt.Sprintf(`default-docker:
+   sigstore: file://%s
+   sigstore-staging: file://%s
+`, sigstorePath, sigstorePath)
+	c.Assert(ioutil.WriteFile("/etc/containers/registries.d/default.yaml", []byte(registriesd), 0755), check.IsNil)
+
+	// signed image
+	cmd = exec.Command("skopeo", "--tls-verify=false", "copy", "--sign-by", "test@redhat.com", "docker://busybox", "docker://"+s.reg1.url+"/busybox:signed")
+	out, _, err = runCommandWithOutput(cmd)
+	c.Assert(err, checker.IsNil, check.Commentf(out))
+
+	// unsigned image on reg1
+	cmd = exec.Command("skopeo", "--tls-verify=false", "copy", "--remove-signatures=true", "docker://"+s.reg1.url+"/busybox:signed", "docker://"+s.reg1.url+"/busybox:what")
+	out, _, err = runCommandWithOutput(cmd)
+	c.Assert(err, checker.IsNil, check.Commentf(out))
+
+	// unsigned image on reg2
+	cmd = exec.Command("skopeo", "--tls-verify=false", "copy", "--remove-signatures=true", "docker://"+s.reg1.url+"/busybox:signed", "docker://"+s.reg2.url+"/busybox:reg2")
+	out, _, err = runCommandWithOutput(cmd)
+	c.Assert(err, checker.IsNil, check.Commentf(out))
+}
+
+func (s *DockerRegistriesSuite) TestPullWithPolicy(c *check.C) {
+	testRequires(c, DaemonIsLinux)
+	testRequires(c, Network)
+
+	homePath := os.Getenv("HOME")
+	defer os.Setenv("HOME", homePath)
+	os.Setenv("HOME", "/root")
+
+	s.setupSignedImages(c)
+
+	defer func() {
+		defaultPolicy := `{
+	"default": [
+		{
+			"type": "insecureAcceptAnything"
+		}
+	]
+}`
+		c.Assert(ioutil.WriteFile("/etc/containers/policy.json", []byte(defaultPolicy), 0755), check.IsNil)
+	}()
+
+	// test pull default policy allow anything
+	dockerCmd(c, "pull", "alpine")
+
+	// test pull default policy reject
+	rejectPolicy := `{
+	"default": [
+		{
+			"type": "reject"
+		}
+	]
+}`
+	c.Assert(ioutil.WriteFile("/etc/containers/policy.json", []byte(rejectPolicy), 0755), check.IsNil)
+
+	out, _, err := dockerCmdWithError("pull", "fedora")
+	c.Assert(err, checker.NotNil)
+	c.Assert(string(out), checker.Contains, "is rejected by policy.")
+
+	// test pull default policy reject + allow private reg with gpg signed
+	policy1 := fmt.Sprintf(`{
+	"default": [
+		{
+			"type": "reject"
+		}
+	],
+	"transports": {
+		"docker": {
+			"%s/busybox": [
+			{
+				"type": "signedBy",
+				"keyType": "GPGKeys",
+				"keyPath": "/root/personal-pubkey.gpg"
+			}
+			]
+		}
+	}
+}`, s.reg1.url)
+	c.Assert(ioutil.WriteFile("/etc/containers/policy.json", []byte(policy1), 0755), check.IsNil)
+
+	// verification passes for the correct signed image
+	dockerCmd(c, "pull", s.reg1.url+"/busybox:signed")
+
+	// TODO(runcom)
+	// test that w/o /etc/containers/registries.d/ sigstore the verification fails
+
+	// TODO(runcom)
+	// test that w/o /etc/containers/policy.json the verification fails
+
+	// TODO(runcom)
+	// test that pulling busybox:signed by digest is forbidden unless we have a
+	// matchRepository in the signedIdentity section of the policy.
+	//
+	// It's probably better to implement containers/image#99.
+	//
+	// matchSignatureForAnyTag -> pull by digest works for any trusted tag
+	// prohibit -> pull by digest fails for a trusted tag
+	// matchPrecisely -> pull by digest works iff transport_name == canonical reference
+
+	// test that the signature is valid only for the "signed" tag
+	out, _, err = dockerCmdWithError("pull", s.reg1.url+"/busybox:what")
+	c.Assert(err, checker.NotNil)
+	c.Assert(string(out), checker.Contains, "is not accepted")
+
+	// test pull default policy reject + allow anything from reg2
+	policy2 := fmt.Sprintf(`{
+	"default": [
+		{
+			"type": "reject"
+		}
+	],
+	"transports": {
+		"docker": {
+			"%s": [
+			{
+				"type": "insecureAcceptAnything"
+			}
+			]
+		}
+	}
+}`, s.reg2.url)
+	c.Assert(ioutil.WriteFile("/etc/containers/policy.json", []byte(policy2), 0755), check.IsNil)
+
+	dockerCmd(c, "pull", s.reg2.url+"/busybox:reg2")
+}

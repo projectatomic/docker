@@ -80,4 +80,13 @@ clone git gopkg.in/fsnotify.v1 v1.2.0
 clone git github.com/aws/aws-sdk-go v0.9.9
 clone git github.com/vaughan0/go-ini a98ad7ee00ec53921f08832bc06ecf7fd600e6a1
 
+# signatures
+clone git github.com/containers/image b6aaec418c03c91344084efd13d14ad80e905cc5
+clone git github.com/opencontainers/image-spec 756744a5dcf23a6c8e4b11ef403522ca3ca33fd9
+clone git k8s.io/kubernetes 4a3f9c5b19c7ff804cbc1bf37a15c044ca5d2353 https://github.com/openshift/kubernetes
+clone git github.com/golang/glog 44145f04b68cf362d9c4df2182967c2275eaefed
+clone git github.com/ghodss/yaml 73d445a93680fa1a78ae23a5839bad48f32ba1ee
+clone git gopkg.in/yaml.v2 d466437aa4adc35830964cffc5b5f262c63ddcb4
+clone git github.com/mtrmac/gpgme master
+
 clean

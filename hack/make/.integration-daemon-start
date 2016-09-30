@@ -9,6 +9,20 @@ if ! command -v docker &> /dev/null; then
 	false
 fi
 
+install_policy() {
+	file="$1"
+	target="/etc/containers/policy.json"
+	if [ "$(go env GOOS)" == "linux"  ]; then
+		if [ ! -e "/etc/containers/policy.json" ]; then
+			echo "Installing $(basename $file) to ${target}"
+			mkdir -p /etc/containers
+			cp -L "$file" "$target"
+		fi
+	fi
+}
+
+install_policy "$ABS_DEST/../../policy.json"
+
 # intentionally open a couple bogus file descriptors to help test that they get scrubbed in containers
 exec 41>&1 42>&2
 

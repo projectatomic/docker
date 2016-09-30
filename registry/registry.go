@@ -33,9 +33,9 @@ var (
 	ErrAlreadyExists = errors.New("Image already exists")
 )
 
-// dockerUserAgent is the User-Agent the Docker client uses to identify itself.
+// DockerUserAgent is the User-Agent the Docker client uses to identify itself.
 // It is populated on init(), comprising version information of different components.
-var dockerUserAgent string
+var DockerUserAgent string
 
 func init() {
 	httpVersion := make([]useragent.VersionInfo, 0, 6)
@@ -48,7 +48,7 @@ func init() {
 	httpVersion = append(httpVersion, useragent.VersionInfo{Name: "os", Version: runtime.GOOS})
 	httpVersion = append(httpVersion, useragent.VersionInfo{Name: "arch", Version: runtime.GOARCH})
 
-	dockerUserAgent = useragent.AppendVersions("", httpVersion...)
+	DockerUserAgent = useragent.AppendVersions("", httpVersion...)
 
 	if runtime.GOOS != "linux" {
 		V2Only = true
@@ -130,11 +130,11 @@ func ReadCertsDirectory(tlsConfig *tls.Config, directory string) error {
 }
 
 // DockerHeaders returns request modifiers that ensure requests have
-// the User-Agent header set to dockerUserAgent and that metaHeaders
+// the User-Agent header set to DockerUserAgent and that metaHeaders
 // are added.
 func DockerHeaders(metaHeaders http.Header) []transport.RequestModifier {
 	modifiers := []transport.RequestModifier{
-		transport.NewHeaderRequestModifier(http.Header{"User-Agent": []string{dockerUserAgent}}),
+		transport.NewHeaderRequestModifier(http.Header{"User-Agent": []string{DockerUserAgent}}),
 	}
 	if metaHeaders != nil {
 		modifiers = append(modifiers, transport.NewHeaderRequestModifier(metaHeaders))

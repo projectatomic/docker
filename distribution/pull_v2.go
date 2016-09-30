@@ -10,6 +10,7 @@ import (
 	"runtime"
 
 	"github.com/Sirupsen/logrus"
+	"github.com/containers/image/signature"
 	"github.com/docker/distribution"
 	"github.com/docker/distribution/digest"
 	"github.com/docker/distribution/manifest/manifestlist"
@@ -41,6 +42,9 @@ type v2Puller struct {
 	// confirmedV2 is set to true if we confirm we're talking to a v2
 	// registry. This is used to limit fallbacks to the v1 protocol.
 	confirmedV2 bool
+
+	policyContext *signature.PolicyContext
+	originalRef   reference.Named
 }
 
 func (p *v2Puller) Pull(ctx context.Context, ref reference.Named) (err error) {
@@ -71,6 +75,11 @@ func (p *v2Puller) Pull(ctx context.Context, ref reference.Named) (err error) {
 func (p *v2Puller) pullV2Repository(ctx context.Context, ref reference.Named) (err error) {
 	var layersDownloaded bool
 	if !reference.IsNameOnly(ref) {
+		var err error
+		ref, err = p.checkTrusted(ctx, ref)
+		if err != nil {
+			return allowV1Fallback(err)
+		}
 		layersDownloaded, err = p.pullV2Tag(ctx, ref)
 		if err != nil {
 			return err
@@ -93,7 +102,12 @@ func (p *v2Puller) pullV2Repository(ctx context.Context, ref reference.Named) (e
 			if err != nil {
 				return err
 			}
-			pulledNew, err := p.pullV2Tag(ctx, tagRef)
+			trustedRef, err := p.checkTrusted(ctx, tagRef)
+			if err != nil {
+				p.originalRef = nil
+				return err
+			}
+			pulledNew, err := p.pullV2Tag(ctx, trustedRef)
 			if err != nil {
 				// Since this is the pull-all-tags case, don't
 				// allow an error pulling a particular tag to
@@ -109,7 +123,9 @@ func (p *v2Puller) pullV2Repository(ctx context.Context, ref reference.Named) (e
 		}
 	}
 
-	writeStatus(ref.String(), p.config.ProgressOutput, layersDownloaded)
+	if p.originalRef != nil {
+		writeStatus(p.originalRef.String(), p.config.ProgressOutput, layersDownloaded)
+	}
 
 	return nil
 }
@@ -287,6 +303,9 @@ func (p *v2Puller) pullV2Tag(ctx context.Context, ref reference.Named) (tagUpdat
 	oldTagImageID, err := p.config.ReferenceStore.Get(ref)
 	if err == nil {
 		if oldTagImageID == imageID {
+			if err := p.addTrustedTag(imageID); err != nil {
+				return false, err
+			}
 			return false, addDigestReference(p.config.ReferenceStore, ref, manifestDigest, imageID)
 		}
 	} else if err != reference.ErrDoesNotExist {
@@ -295,6 +314,9 @@ func (p *v2Puller) pullV2Tag(ctx context.Context, ref reference.Named) (tagUpdat
 
 	if canonical, ok := ref.(reference.Canonical); ok {
 		if err = p.config.ReferenceStore.AddDigest(canonical, imageID, true); err != nil {
+			return false, err
+		}
+		if err := p.addTrustedTag(imageID); err != nil {
 			return false, err
 		}
 	} else {
@@ -306,6 +328,17 @@ func (p *v2Puller) pullV2Tag(ctx context.Context, ref reference.Named) (tagUpdat
 		}
 	}
 	return true, nil
+}
+
+func (p *v2Puller) addTrustedTag(id image.ID) error {
+	if p.policyContext != nil {
+		if _, ok := p.originalRef.(reference.Canonical); !ok {
+			if err := p.config.ReferenceStore.AddTag(p.originalRef, id, true); err != nil {
+				return err
+			}
+		}
+	}
+	return nil
 }
 
 func (p *v2Puller) pullSchema1(ctx context.Context, ref reference.Named, unverifiedManifest *schema1.SignedManifest) (imageID image.ID, manifestDigest digest.Digest, err error) {
