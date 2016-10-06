@@ -528,6 +528,10 @@ func (container *Container) CopyImagePathContent(v volume.Volume, destination st
 		return err
 	}
 
+	if err := label.Relabel(path, container.MountLabel, true); err != nil && err != syscall.ENOTSUP {
+		return err
+	}
+
 	return v.Unmount()
 }
 
