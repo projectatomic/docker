@@ -4,6 +4,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"io/ioutil"
 	"path/filepath"
 	"strings"
 	"syscall"
@@ -234,10 +235,10 @@ func (clnt *client) AddProcess(containerID, processFriendlyName string, procToAd
 
 	// Convert io.ReadClosers to io.Readers
 	if stdout != nil {
-		iopipe.Stdout = openReaderFromPipe(stdout)
+		iopipe.Stdout = ioutil.NopCloser(&autoClosingReader{ReadCloser: stdout})
 	}
 	if stderr != nil {
-		iopipe.Stderr = openReaderFromPipe(stderr)
+		iopipe.Stderr = ioutil.NopCloser(&autoClosingReader{ReadCloser: stderr})
 	}
 
 	pid := newProcess.Pid()
