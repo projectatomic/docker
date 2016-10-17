@@ -26,7 +26,7 @@ func (pm *Manager) enable(p *plugin) error {
 	}
 
 	p.restartManager = restartmanager.New(container.RestartPolicy{Name: "always"}, 0)
-	if err := pm.containerdClient.Create(p.P.ID, libcontainerd.Spec(*spec), libcontainerd.WithRestartManager(p.restartManager)); err != nil { // POC-only
+	if err := pm.containerdClient.Create(p.P.ID, libcontainerd.Spec(*spec), attachToLog(p.PluginObj.ID), libcontainerd.WithRestartManager(p.restartManager)); err != nil { // POC-only
 		return err
 	}
 
@@ -54,7 +54,7 @@ func (pm *Manager) enable(p *plugin) error {
 
 func (pm *Manager) restore(p *plugin) error {
 	p.restartManager = restartmanager.New(container.RestartPolicy{Name: "always"}, 0)
-	return pm.containerdClient.Restore(p.P.ID, libcontainerd.WithRestartManager(p.restartManager))
+	return pm.containerdClient.Restore(p.P.ID, attachToLog(p.PluginObj.ID), libcontainerd.WithRestartManager(p.restartManager))
 }
 
 func (pm *Manager) initSpec(p *plugin) (*specs.Spec, error) {

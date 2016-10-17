@@ -29,7 +29,10 @@ type client struct {
 	liveRestore   bool
 }
 
-func (clnt *client) AddProcess(containerID, processFriendlyName string, specp Process) error {
+// AddProcess is the handler for adding a process to an already running
+// container. It's called through docker exec. It returns the system pid of the
+// exec'd process.
+func (clnt *client) AddProcess(containerID, processFriendlyName string, specp Process, attachStdio StdioCallback) error {
 	clnt.lock(containerID)
 	defer clnt.unlock(containerID)
 	container, err := clnt.getContainer(containerID)
@@ -110,14 +113,10 @@ func (clnt *client) AddProcess(containerID, processFriendlyName string, specp Pr
 
 	container.processes[processFriendlyName] = p
 
-	clnt.unlock(containerID)
-
-	if err := clnt.backend.AttachStreams(processFriendlyName, *iopipe); err != nil {
-		clnt.lock(containerID)
+	if err := attachStdio(*iopipe); err != nil {
 		p.closeFifos(iopipe)
 		return err
 	}
-	clnt.lock(containerID)
 
 	return nil
 }
@@ -147,7 +146,7 @@ func (clnt *client) prepareBundleDir(uid, gid int) (string, error) {
 	return p, nil
 }
 
-func (clnt *client) Create(containerID string, spec Spec, options ...CreateOption) (err error) {
+func (clnt *client) Create(containerID string, spec Spec, attachStdio StdioCallback, options ...CreateOption) (err error) {
 	clnt.lock(containerID)
 	defer clnt.unlock(containerID)
 
@@ -173,6 +172,7 @@ func (clnt *client) Create(containerID string, spec Spec, options ...CreateOptio
 	if err := container.clean(); err != nil {
 		return err
 	}
+	container.attachStdio = attachStdio // hack for v1.12 backport
 
 	defer func() {
 		if err != nil {
@@ -194,7 +194,7 @@ func (clnt *client) Create(containerID string, spec Spec, options ...CreateOptio
 		return err
 	}
 
-	return container.start()
+	return container.start(attachStdio)
 }
 
 func (clnt *client) Signal(containerID string, sig int) error {
@@ -409,7 +409,7 @@ func (clnt *client) getOrCreateExitNotifier(containerID string) *exitNotifier {
 	return w
 }
 
-func (clnt *client) restore(cont *containerd.Container, options ...CreateOption) (err error) {
+func (clnt *client) restore(cont *containerd.Container, attachStdio StdioCallback, options ...CreateOption) (err error) {
 	clnt.lock(cont.Id)
 	defer clnt.unlock(cont.Id)
 
@@ -450,7 +450,7 @@ func (clnt *client) restore(cont *containerd.Container, options ...CreateOption)
 		return err
 	})
 
-	if err := clnt.backend.AttachStreams(containerID, *iopipe); err != nil {
+	if err := attachStdio(*iopipe); err != nil {
 		container.closeFifos(iopipe)
 		return err
 	}
@@ -484,11 +484,11 @@ func (clnt *client) restore(cont *containerd.Container, options ...CreateOption)
 	return nil
 }
 
-func (clnt *client) Restore(containerID string, options ...CreateOption) error {
+func (clnt *client) Restore(containerID string, attachStdio StdioCallback, options ...CreateOption) error {
 	if clnt.liveRestore {
 		cont, err := clnt.getContainerdContainer(containerID)
 		if err == nil && cont.Status != "stopped" {
-			if err := clnt.restore(cont, options...); err != nil {
+			if err := clnt.restore(cont, attachStdio, options...); err != nil {
 				logrus.Errorf("error restoring %s: %v", containerID, err)
 			}
 			return nil

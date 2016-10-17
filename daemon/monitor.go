@@ -3,14 +3,11 @@ package daemon
 import (
 	"errors"
 	"fmt"
-	"io"
 	"runtime"
 	"strconv"
 
 	"github.com/Sirupsen/logrus"
-	"github.com/docker/docker/daemon/exec"
 	"github.com/docker/docker/libcontainerd"
-	"github.com/docker/docker/runconfig"
 )
 
 // StateChanged updates daemon state changes from containerd
@@ -97,68 +94,6 @@ func (daemon *Daemon) StateChanged(id string, e libcontainerd.StateInfo) error {
 		c.Paused = false
 		daemon.updateHealthMonitor(c)
 		daemon.LogContainerEvent(c, "unpause")
-	}
-
-	return nil
-}
-
-// AttachStreams is called by libcontainerd to connect the stdio.
-func (daemon *Daemon) AttachStreams(id string, iop libcontainerd.IOPipe) error {
-	var (
-		s  *runconfig.StreamConfig
-		ec *exec.Config
-	)
-
-	c := daemon.containers.Get(id)
-	if c == nil {
-		var err error
-		ec, err = daemon.getExecConfig(id)
-		if err != nil {
-			return fmt.Errorf("no such exec/container: %s", id)
-		}
-		s = ec.StreamConfig
-	} else {
-		s = c.StreamConfig
-		if err := daemon.StartLogging(c); err != nil {
-			c.Reset(false)
-			return err
-		}
-	}
-
-	if stdin := s.Stdin(); stdin != nil {
-		if iop.Stdin != nil {
-			go func() {
-				io.Copy(iop.Stdin, stdin)
-				iop.Stdin.Close()
-			}()
-		}
-	} else {
-		//TODO(swernli): On Windows, not closing stdin when no tty is requested by the exec Config
-		// results in a hang. We should re-evaluate generalizing this fix for all OSes if
-		// we can determine that is the right thing to do more generally.
-		if (c != nil && !c.Config.Tty) || (ec != nil && !ec.Tty && runtime.GOOS == "windows") {
-			// tty is enabled, so dont close containerd's iopipe stdin.
-			if iop.Stdin != nil {
-				iop.Stdin.Close()
-			}
-		}
-	}
-
-	copyFunc := func(w io.Writer, r io.Reader) {
-		s.Add(1)
-		go func() {
-			if _, err := io.Copy(w, r); err != nil {
-				logrus.Errorf("%v stream copy error: %v", id, err)
-			}
-			s.Done()
-		}()
-	}
-
-	if iop.Stdout != nil {
-		copyFunc(s.Stdout(), iop.Stdout)
-	}
-	if iop.Stderr != nil {
-		copyFunc(s.Stderr(), iop.Stderr)
 	}
 
 	return nil

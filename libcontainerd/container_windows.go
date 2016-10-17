@@ -36,7 +36,7 @@ func (ctr *container) newProcess(friendlyName string) *process {
 	}
 }
 
-func (ctr *container) start() error {
+func (ctr *container) start(attachStdio StdioCallback) error {
 	var err error
 	isServicing := false
 
@@ -143,7 +143,7 @@ func (ctr *container) start() error {
 
 	ctr.client.appendContainer(ctr)
 
-	if err := ctr.client.backend.AttachStreams(ctr.containerID, *iopipe); err != nil {
+	if err := attachStdio(*iopipe); err != nil {
 		// OK to return the error here, as waitExit will handle tear-down in HCS
 		return err
 	}
@@ -250,7 +250,7 @@ func (ctr *container) waitExit(process *process, isFirstProcessToStart bool) err
 						}
 						logrus.Error(err)
 					} else {
-						ctr.client.Create(ctr.containerID, ctr.ociSpec, ctr.options...)
+						ctr.client.Create(ctr.containerID, ctr.ociSpec, ctr.attachStdio, ctr.options...)
 					}
 				}()
 			}
