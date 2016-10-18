@@ -13,6 +13,7 @@ import (
 	"github.com/Sirupsen/logrus"
 	containerd "github.com/docker/containerd/api/grpc/types"
 	"github.com/docker/docker/pkg/idtools"
+	"github.com/docker/docker/pkg/ioutils"
 	"github.com/docker/docker/pkg/mount"
 	specs "github.com/opencontainers/specs/specs-go"
 	"golang.org/x/net/context"
@@ -94,11 +95,26 @@ func (clnt *client) AddProcess(containerID, processFriendlyName string, specp Pr
 		return err
 	}
 
+	var stdinOnce sync.Once
+	stdin := iopipe.Stdin
+	iopipe.Stdin = ioutils.NewWriteCloserWrapper(stdin, func() error {
+		var err error
+		stdinOnce.Do(func() { // on error from attach we don't know if stdin was already closed
+			err = stdin.Close()
+			if err2 := p.sendCloseStdin(); err == nil {
+				err = err2
+			}
+		})
+		return err
+	})
+
 	container.processes[processFriendlyName] = p
 
 	clnt.unlock(containerID)
 
 	if err := clnt.backend.AttachStreams(processFriendlyName, *iopipe); err != nil {
+		clnt.lock(containerID)
+		p.closeFifos(iopipe)
 		return err
 	}
 	clnt.lock(containerID)
@@ -424,8 +440,18 @@ func (clnt *client) restore(cont *containerd.Container, options ...CreateOption)
 	if err != nil {
 		return err
 	}
+	var stdinOnce sync.Once
+	stdin := iopipe.Stdin
+	iopipe.Stdin = ioutils.NewWriteCloserWrapper(stdin, func() error {
+		var err error
+		stdinOnce.Do(func() { // on error from attach we don't know if stdin was already closed
+			err = stdin.Close()
+		})
+		return err
+	})
 
 	if err := clnt.backend.AttachStreams(containerID, *iopipe); err != nil {
+		container.closeFifos(iopipe)
 		return err
 	}
 
@@ -438,6 +464,7 @@ func (clnt *client) restore(cont *containerd.Container, options ...CreateOption)
 		}})
 
 	if err != nil {
+		container.closeFifos(iopipe)
 		return err
 	}
 
