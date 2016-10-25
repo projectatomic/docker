@@ -167,7 +167,7 @@ clone git github.com/inconshreveable/mousetrap 76626ae9c91c4f2a10f34cad8ce83ea42
 clone git github.com/flynn-archive/go-shlex 3f9db97f856818214da2e1057f8ad84803971cff
 
 # signatures
-clone git github.com/containers/image 6f5f102da5ee57ddca4f23d2c0e4cc7da9cb54b4
+clone git github.com/containers/image untagged-reference-sig-check https://github.com/mtrmac/image
 clone git github.com/opencontainers/image-spec 756744a5dcf23a6c8e4b11ef403522ca3ca33fd9
 clone git k8s.io/kubernetes 4a3f9c5b19c7ff804cbc1bf37a15c044ca5d2353 https://github.com/openshift/kubernetes
 clone git github.com/golang/glog 44145f04b68cf362d9c4df2182967c2275eaefed

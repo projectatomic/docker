@@ -386,7 +386,7 @@ func (pr *prSignedBy) UnmarshalJSON(data []byte) error {
 		return InvalidPolicyFormatError(fmt.Sprintf("Unexpected policy requirement type \"%s\"", tmp.Type))
 	}
 	if signedIdentity == nil {
-		tmp.SignedIdentity = NewPRMMatchExact()
+		tmp.SignedIdentity = NewPRMMatchExact(true)
 	} else {
 		si, err := newPolicyReferenceMatchFromJSON(signedIdentity)
 		if err != nil {
@@ -501,7 +501,7 @@ func (pr *prSignedBaseLayer) UnmarshalJSON(data []byte) error {
 	return nil
 }
 
-// newPolicyRequirementFromJSON parses JSON data into a PolicyReferenceMatch implementation.
+// newPolicyReferenceFromJSON parses JSON data into a PolicyReferenceMatch implementation.
 func newPolicyReferenceMatchFromJSON(data []byte) (PolicyReferenceMatch, error) {
 	var typeField prmCommon
 	if err := json.Unmarshal(data, &typeField); err != nil {
@@ -527,13 +527,16 @@ func newPolicyReferenceMatchFromJSON(data []byte) (PolicyReferenceMatch, error) 
 }
 
 // newPRMMatchExact is NewPRMMatchExact, except it resturns the private type.
-func newPRMMatchExact() *prmMatchExact {
-	return &prmMatchExact{prmCommon{Type: prmTypeMatchExact}}
+func newPRMMatchExact(allowReferencesByDigest bool) *prmMatchExact {
+	return &prmMatchExact{
+		prmCommon:               prmCommon{Type: prmTypeMatchExact},
+		AllowReferencesByDigest: allowReferencesByDigest,
+	}
 }
 
 // NewPRMMatchExact returns a new "matchExact" PolicyReferenceMatch.
-func NewPRMMatchExact() PolicyReferenceMatch {
-	return newPRMMatchExact()
+func NewPRMMatchExact(allowReferencesByDigest bool) PolicyReferenceMatch {
+	return newPRMMatchExact(allowReferencesByDigest)
 }
 
 // Compile-time check that prmMatchExact implements json.Unmarshaler.
@@ -542,11 +545,13 @@ var _ json.Unmarshaler = (*prmMatchExact)(nil)
 // UnmarshalJSON implements the json.Unmarshaler interface.
 func (prm *prmMatchExact) UnmarshalJSON(data []byte) error {
 	*prm = prmMatchExact{}
-	var tmp prmMatchExact
+	tmp := prmMatchExact{AllowReferencesByDigest: true} // NOTE: The JSON default is different from the Golang default
 	if err := paranoidUnmarshalJSONObject(data, func(key string) interface{} {
 		switch key {
 		case "type":
 			return &tmp.Type
+		case "allowReferencesByDigest":
+			return &tmp.AllowReferencesByDigest
 		default:
 			return nil
 		}
@@ -557,7 +562,7 @@ func (prm *prmMatchExact) UnmarshalJSON(data []byte) error {
 	if tmp.Type != prmTypeMatchExact {
 		return InvalidPolicyFormatError(fmt.Sprintf("Unexpected policy requirement type \"%s\"", tmp.Type))
 	}
-	*prm = *newPRMMatchExact()
+	*prm = *newPRMMatchExact(tmp.AllowReferencesByDigest)
 	return nil
 }
 

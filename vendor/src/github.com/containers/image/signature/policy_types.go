@@ -122,9 +122,11 @@ const (
 	prmTypeExactRepository prmTypeIdentifier = "exactRepository"
 )
 
-// prmMatchExact is a PolicyReferenceMatch with type = prmMatchExact: the two references must match exactly.
+// prmMatchExact is a PolicyReferenceMatch with type = prmMatchExact: the two references must match exactly,
+// except that digest references may be accepted regardless of tag if AllowReferencesByDigest
 type prmMatchExact struct {
 	prmCommon
+	AllowReferencesByDigest bool `json:"allowReferencesByDigest"` // NOTE: If missing in JSON, this defaults to true (but defaults to false in Golang!)
 }
 
 // prmMatchRepository is a PolicyReferenceMatch with type = prmMatchRepository: the two references must use the same repository, may differ in the tag.

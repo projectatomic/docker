@@ -29,11 +29,23 @@ func (prm *prmMatchExact) matchesDockerReference(image types.UnparsedImage, sign
 	if err != nil {
 		return false
 	}
+
 	// Do not add default tags: image.Reference().DockerReference() should contain it already, and signatureDockerReference should be exact; so, verify that now.
-	if reference.IsNameOnly(intended) || reference.IsNameOnly(signature) {
+	if reference.IsNameOnly(signature) {
 		return false
 	}
-	return signature.String() == intended.String()
+	switch intended.(type) {
+	case reference.NamedTagged: // Includes the case when intended has both a tag and a digest.
+		return signature.String() == intended.String()
+	case reference.Canonical:
+		// We don’t actually compare the manifest digest against the signature here; that happens prSignedBy.in UnparsedImage.Manifest.
+		// Becase UnparsedImage.Manifest verifies the intended.Digest() against the manifest, and prSignedBy verifies the signature digest against the manifest,
+		// we know that signature digest matches intended.Digest() (but intended.Digest() and signature digest may use different algorithms)
+		// FIXME? Compare the digests here anyway, for extra safety against code changes, at the cost of not supporting pull-by-digest using a different algorithm than the signature?
+		return prm.AllowReferencesByDigest
+	default: // !reference.IsNameOnly(intended)
+		return false
+	}
 }
 
 func (prm *prmMatchRepository) matchesDockerReference(image types.UnparsedImage, signatureDockerReference string) bool {
