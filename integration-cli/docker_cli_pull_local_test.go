@@ -723,7 +723,10 @@ func (s *DockerRegistriesSuite) TestPullWithPolicy(c *check.C) {
 		"docker": {
 			"%s/busybox": [
 			{
-				"referencesByDigest": "reject",
+				"signedIdentity": {
+					"type": "matchExact",
+					"allowReferencesByDigest": false
+				},
 				"type": "signedBy",
 				"keyType": "GPGKeys",
 				"keyPath": "/root/personal-pubkey.gpg"
