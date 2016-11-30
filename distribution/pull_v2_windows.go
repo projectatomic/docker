@@ -6,8 +6,11 @@ import (
 	"encoding/json"
 	"fmt"
 
+	"github.com/containers/image/signature"
 	"github.com/docker/distribution/manifest/schema1"
 	"github.com/docker/docker/image"
+	"github.com/docker/docker/reference"
+	gctx "golang.org/x/net/context"
 )
 
 func detectBaseLayer(is image.Store, m *schema1.Manifest, rootFS *image.RootFS) error {
@@ -26,4 +29,12 @@ func detectBaseLayer(is image.Store, m *schema1.Manifest, rootFS *image.RootFS) 
 		}
 	}
 	return fmt.Errorf("Invalid base layer %q", v1img.Parent)
+}
+
+func configurePolicyContext() (*signature.PolicyContext, error) {
+	return nil, nil
+}
+
+func (p *v2Puller) checkTrusted(c gctx.Context, ref reference.Named) (reference.Named, error) {
+	return ref, nil
 }
