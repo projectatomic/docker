@@ -422,18 +422,27 @@ func (pd *v2PushDescriptor) Descriptor() distribution.Descriptor {
 	return pd.remoteDescriptor
 }
 
-// layerAlreadyExists checks if the registry already know about any of the
-// metadata passed in the "metadata" slice. If it finds one that the registry
-// knows about, it returns the known digest and "true".
+// layerAlreadyExists checks if the registry already knows about any of the metadata passed in the "metadata"
+// slice. If it finds one that the registry knows about, it returns the known digest and "true".
 func layerAlreadyExists(ctx context.Context, metadata []metadata.V2Metadata, repoInfo reference.Named, repo distribution.Repository, pushState *pushState) (distribution.Descriptor, bool, error) {
+	layerDigests := make(map[digest.Digest]struct{})
 	for _, meta := range metadata {
-		descriptor, err := repo.Blobs(ctx).Stat(ctx, meta.Digest)
+		// if there's a precise repository match, don't attempt any other digest
+		if meta.SourceRepository == repoInfo.FullName() {
+			layerDigests = map[digest.Digest]struct{}{meta.Digest: {}}
+			break
+		}
+		layerDigests[meta.Digest] = struct{}{}
+	}
+
+	for dgst := range layerDigests {
+		descriptor, err := repo.Blobs(ctx).Stat(ctx, dgst)
 		switch err {
 		case nil:
 			descriptor.MediaType = schema2.MediaTypeLayer
 			return descriptor, true, nil
 		case distribution.ErrBlobUnknown:
-			return distribution.Descriptor{}, false, nil
+			// nop
 		default:
 			return distribution.Descriptor{}, false, err
 		}
