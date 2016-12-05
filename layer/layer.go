@@ -173,6 +173,7 @@ type Store interface {
 	Release(Layer) ([]Metadata, error)
 
 	CreateRWLayer(id string, parent ChainID, mountLabel string, initFunc MountInit, storageOpt map[string]string) (RWLayer, error)
+	CreateSharedLayer(id string, parent ChainID, mountLabel string, initFunc MountInit, storageOpt map[string]string) (RWLayer, error)
 	GetRWLayer(id string) (RWLayer, error)
 	GetMountID(id string) (string, error)
 	ReleaseRWLayer(RWLayer) ([]Metadata, error)
@@ -220,11 +221,15 @@ type MetadataStore interface {
 
 	SetMountID(string, string) error
 	SetInitID(string, string) error
+	SetInitName(string, string) error
 	SetMountParent(string, ChainID) error
+	SetMountShared(string) error
 
 	GetMountID(string) (string, error)
 	GetInitID(string) (string, error)
+	GetInitName(string) (string, error)
 	GetMountParent(string) (ChainID, error)
+	GetMountShared(string) (bool, error)
 
 	// List returns the full list of referenced
 	// read-only and read-write layers

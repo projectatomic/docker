@@ -198,6 +198,10 @@ func (a *Driver) Exists(id string) bool {
 	return true
 }
 
+func (a *Driver) CreateShared(id, parent, mountLabel string, storageOpt map[string]string) error {
+	return graphdriver.CreateSharedNotSupported("aufs")
+}
+
 // CreateReadWrite creates a layer that is writable for use as a container
 // file system.
 func (a *Driver) CreateReadWrite(id, parent, mountLabel string, storageOpt map[string]string) error {
@@ -264,6 +268,10 @@ func (a *Driver) createDirsFor(id string) error {
 	return nil
 }
 
+func (a *Driver) RemoveShared(id string) error {
+	return graphdriver.RemoveSharedNotSupported("aufs")
+}
+
 // Remove will unmount and remove the given id.
 func (a *Driver) Remove(id string) error {
 	a.pathCacheLock.Lock()
@@ -303,6 +311,10 @@ func (a *Driver) Remove(id string) error {
 	return nil
 }
 
+func (a *Driver) GetShared(id, parentPath string) (string, error) {
+	return "", graphdriver.GetSharedNotSupported("aufs")
+}
+
 // Get returns the rootfs path for the id.
 // This will mount the dir at its given path
 func (a *Driver) Get(id, mountLabel string) (string, error) {
@@ -337,6 +349,10 @@ func (a *Driver) Get(id, mountLabel string) (string, error) {
 	a.pathCache[id] = m
 	a.pathCacheLock.Unlock()
 	return m, nil
+}
+
+func (a *Driver) PutShared(id string) error {
+	return graphdriver.PutSharedNotSupported("aufs")
 }
 
 // Put unmounts and updates list of active mounts.

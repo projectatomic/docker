@@ -103,7 +103,7 @@ func (daemon *Daemon) create(params types.ContainerCreateConfig, managed bool) (
 	container.HostConfig.StorageOpt = params.HostConfig.StorageOpt
 
 	// Set RWLayer for container after mount labels have been set
-	if err := daemon.setRWLayer(container); err != nil {
+	if err := daemon.setRWLayer(container, params.HostConfig.SharedRootfs); err != nil {
 		return nil, err
 	}
 
@@ -195,7 +195,7 @@ func (daemon *Daemon) generateSecurityOpt(ipcMode containertypes.IpcMode, pidMod
 	return nil, nil
 }
 
-func (daemon *Daemon) setRWLayer(container *container.Container) error {
+func (daemon *Daemon) setRWLayer(container *container.Container, shared bool) error {
 	var layerID layer.ChainID
 	if container.ImageID != "" {
 		img, err := daemon.imageStore.Get(container.ImageID)
@@ -204,12 +204,20 @@ func (daemon *Daemon) setRWLayer(container *container.Container) error {
 		}
 		layerID = img.RootFS.ChainID()
 	}
-	rwLayer, err := daemon.layerStore.CreateRWLayer(container.ID, layerID, container.MountLabel, daemon.setupInitLayer, container.HostConfig.StorageOpt)
-	if err != nil {
-		return err
-	}
-	container.RWLayer = rwLayer
 
+	if shared {
+		rwLayer, err := daemon.layerStore.CreateSharedLayer(container.ID, layerID, container.MountLabel, daemon.getLayerInit(), container.HostConfig.StorageOpt)
+		if err != nil {
+			return err
+		}
+		container.RWLayer = rwLayer
+	} else {
+		rwLayer, err := daemon.layerStore.CreateRWLayer(container.ID, layerID, container.MountLabel, daemon.getLayerInit(), container.HostConfig.StorageOpt)
+		if err != nil {
+			return err
+		}
+		container.RWLayer = rwLayer
+	}
 	return nil
 }
 

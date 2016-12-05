@@ -201,6 +201,9 @@ func (d *Driver) GetMetadata(id string) (map[string]string, error) {
 func (d *Driver) Cleanup() error {
 	return mount.Unmount(d.home)
 }
+func (d *Driver) CreateShared(id, parent, mountLabel string, storageOpt map[string]string) error {
+	return graphdriver.CreateSharedNotSupported("overlay2")
+}
 
 // CreateReadWrite creates a layer that is writable for use as a container
 // file system.
@@ -322,6 +325,10 @@ func (d *Driver) getLowerDirs(id string) ([]string, error) {
 	return lowersArray, nil
 }
 
+func (d *Driver) RemoveShared(id string) error {
+	return graphdriver.RemoveSharedNotSupported("overlay2")
+}
+
 // Remove cleans the directories that are created for this id.
 func (d *Driver) Remove(id string) error {
 	dir := d.dir(id)
@@ -336,6 +343,10 @@ func (d *Driver) Remove(id string) error {
 		return err
 	}
 	return nil
+}
+
+func (a *Driver) GetShared(id, parentPath string) (string, error) {
+	return "", graphdriver.GetSharedNotSupported("overlay2")
 }
 
 // Get creates and mounts the required file system for the given id and returns the mount path.
@@ -390,6 +401,10 @@ func (d *Driver) Get(id string, mountLabel string) (s string, err error) {
 	}
 
 	return mergedDir, nil
+}
+
+func (d *Driver) PutShared(id string) error {
+	return graphdriver.PutSharedNotSupported("overlay2")
 }
 
 // Put unmounts the mount path created for the give id.

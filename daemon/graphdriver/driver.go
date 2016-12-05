@@ -52,8 +52,12 @@ type ProtoDriver interface {
 	// Create creates a new, empty, filesystem layer with the
 	// specified id and parent and mountLabel. Parent and mountLabel may be "".
 	Create(id, parent, mountLabel string, storageOpt map[string]string) error
+	// Creates a new shared layer.
+	CreateShared(id, parent, mountLabel string, storageOpt map[string]string) error
 	// Remove attempts to remove the filesystem layer with this id.
 	Remove(id string) error
+	// RemoveShared attempts to remove the filesystem layer with this id.
+	RemoveShared(id string) error
 	// Get returns the mountpoint for the layered filesystem referred
 	// to by this id. You can optionally specify a mountLabel or "".
 	// Returns the absolute path to the mounted layered filesystem.
@@ -61,6 +65,14 @@ type ProtoDriver interface {
 	// Put releases the system resources for the specified id,
 	// e.g, unmounting layered filesystem.
 	Put(id string) error
+	// GetShared() returns the mountpoint for the layered filesystem
+	// referred to by this id. This new layer is shares it contents
+	// with the parent layer whose id is passed in parent
+	// Returns the absolute path to the mounted layered filesystem.
+	GetShared(id, parent string) (string, error)
+	// PutShared releases the system resources for the specified id,
+	// e.g, unmounting layered filesystem.
+	PutShared(id string) error
 	// Exists returns whether a filesystem layer with the specified
 	// ID exists on this driver.
 	Exists(id string) bool
@@ -240,4 +252,20 @@ func scanPriorDrivers(root string) map[string]bool {
 		}
 	}
 	return driversMap
+}
+
+func CreateSharedNotSupported(graphdriver string) error {
+	return fmt.Errorf("CreateShared() is not supported by graphdriver %v", graphdriver)
+}
+
+func GetSharedNotSupported(graphdriver string) error {
+	return fmt.Errorf("GetShared() is not supported by graphdriver %v", graphdriver)
+}
+
+func PutSharedNotSupported(graphdriver string) error {
+	return fmt.Errorf("PutShared() is not supported by graphdriver %v", graphdriver)
+}
+
+func RemoveSharedNotSupported(graphdriver string) error {
+	return fmt.Errorf("RemoveShared() is not supported by graphdriver %v", graphdriver)
 }

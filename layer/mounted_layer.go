@@ -7,13 +7,15 @@ import (
 )
 
 type mountedLayer struct {
-	name       string
-	mountID    string
-	initID     string
-	parent     *roLayer
-	path       string
-	layerStore *layerStore
+	name        string
+	mountID     string
+	initID      string
+	initRWLayer RWLayer
+	parent      *roLayer
+	path        string
+	layerStore  *layerStore
 
+	shared     bool
 	references map[RWLayer]*referencedRWLayer
 }
 
@@ -93,11 +95,28 @@ type referencedRWLayer struct {
 }
 
 func (rl *referencedRWLayer) Mount(mountLabel string) (string, error) {
-	return rl.layerStore.driver.Get(rl.mountedLayer.mountID, mountLabel)
+	if rl.mountedLayer.shared {
+		// For shared Layers, call get on -init layer first.
+		_, err := rl.layerStore.driver.Get(rl.mountedLayer.initID, mountLabel)
+		if err != nil {
+			return "", err
+		}
+		return rl.layerStore.driver.GetShared(rl.mountedLayer.mountID, rl.mountedLayer.initID)
+	} else {
+		return rl.layerStore.driver.Get(rl.mountedLayer.mountID, mountLabel)
+	}
 }
 
 // Unmount decrements the activity count and unmounts the underlying layer
 // Callers should only call `Unmount` once per call to `Mount`, even on error.
 func (rl *referencedRWLayer) Unmount() error {
-	return rl.layerStore.driver.Put(rl.mountedLayer.mountID)
+	if rl.mountedLayer.shared {
+		if err := rl.layerStore.driver.PutShared(rl.mountedLayer.mountID); err != nil {
+			return err
+		}
+		// For shared Layers, call put on -init layer as well.
+		return rl.layerStore.driver.Put(rl.mountedLayer.initID)
+	} else {
+		return rl.layerStore.driver.Put(rl.mountedLayer.mountID)
+	}
 }

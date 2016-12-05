@@ -253,6 +253,10 @@ func (d *Driver) mountPath(id string) string {
 	return path.Join(d.options.mountPath, "graph", getMountpoint(id))
 }
 
+func (d *Driver) CreateShared(id, parent, mountLabel string, storageOpt map[string]string) error {
+	return graphdriver.CreateSharedNotSupported("zfs")
+}
+
 // CreateReadWrite creates a layer that is writable for use as a container
 // file system.
 func (d *Driver) CreateReadWrite(id, parent, mountLabel string, storageOpt map[string]string) error {
@@ -334,6 +338,10 @@ func setQuota(name string, quota string) error {
 	return fs.SetProperty("quota", quota)
 }
 
+func (d *Driver) RemoveShared(id string) error {
+	return graphdriver.RemoveSharedNotSupported("zfs")
+}
+
 // Remove deletes the dataset, filesystem and the cache for the given id.
 func (d *Driver) Remove(id string) error {
 	name := d.zfsPath(id)
@@ -345,6 +353,10 @@ func (d *Driver) Remove(id string) error {
 		d.Unlock()
 	}
 	return err
+}
+
+func (a *Driver) GetShared(id, parentPath string) (string, error) {
+	return "", graphdriver.GetSharedNotSupported("zfs")
 }
 
 // Get returns the mountpoint for the given id after creating the target directories if necessary.
@@ -383,6 +395,10 @@ func (d *Driver) Get(id, mountLabel string) (string, error) {
 	}
 
 	return mountpoint, nil
+}
+
+func (d *Driver) PutShared(id string) error {
+	return graphdriver.PutSharedNotSupported("zfs")
 }
 
 // Put removes the existing mountpoint for the given id if it exists.

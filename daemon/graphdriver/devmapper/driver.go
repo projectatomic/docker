@@ -128,7 +128,16 @@ func (d *Driver) CreateReadWrite(id, parent, mountLabel string, storageOpt map[s
 
 // Create adds a device with a given id and the parent.
 func (d *Driver) Create(id, parent, mountLabel string, storageOpt map[string]string) error {
-	if err := d.DeviceSet.AddDevice(id, parent, storageOpt); err != nil {
+	if err := d.DeviceSet.AddDevice(id, parent, storageOpt, false); err != nil {
+		return err
+	}
+
+	return nil
+}
+
+// CreateShared adds a device with a given id and the parent.
+func (d *Driver) CreateShared(id, parent, mountLabel string, storageOpt map[string]string) error {
+	if err := d.DeviceSet.AddDevice(id, parent, storageOpt, true); err != nil {
 		return err
 	}
 
@@ -137,6 +146,16 @@ func (d *Driver) Create(id, parent, mountLabel string, storageOpt map[string]str
 
 // Remove removes a device with a given id, unmounts the filesystem.
 func (d *Driver) Remove(id string) error {
+	return d.remove(id, false)
+}
+
+// RemoveShared removes a device with a given id, unmounts the filesystem.
+func (d *Driver) RemoveShared(id string) error {
+	return d.remove(id, true)
+}
+
+// Remove removes a device with a given id, unmounts the filesystem.
+func (d *Driver) remove(id string, shared bool) error {
 	if !d.DeviceSet.HasDevice(id) {
 		// Consider removing a non-existing device a no-op
 		// This is useful to be able to progress on container removal
@@ -145,7 +164,7 @@ func (d *Driver) Remove(id string) error {
 	}
 
 	// This assumes the device has been properly Get/Put:ed and thus is unmounted
-	if err := d.DeviceSet.DeleteDevice(id, false); err != nil {
+	if err := d.DeviceSet.DeleteDevice(id, false, shared); err != nil {
 		return err
 	}
 
@@ -158,9 +177,25 @@ func (d *Driver) Remove(id string) error {
 }
 
 // Get mounts a device with given id into the root filesystem
+func (d *Driver) GetShared(id, parent string) (string, error) {
+	return d.get(id, parent, "", true)
+}
+
+// Get mounts a device with given id into the root filesystem
 func (d *Driver) Get(id, mountLabel string) (string, error) {
+	return d.get(id, "", mountLabel, false)
+}
+
+// Get mounts a device with given id into the root filesystem
+func (d *Driver) get(id, parent, mountLabel string, shared bool) (string, error) {
 	mp := path.Join(d.home, "mnt", id)
 	rootFs := path.Join(mp, "rootfs")
+
+	var parentMP string
+	if parent != "" {
+		parentMP = path.Join(d.home, "mnt", parent)
+	}
+
 	if count := d.ctr.Increment(mp); count > 1 {
 		return rootFs, nil
 	}
@@ -182,14 +217,14 @@ func (d *Driver) Get(id, mountLabel string) (string, error) {
 	}
 
 	// Mount the device
-	if err := d.DeviceSet.MountDevice(id, mp, mountLabel); err != nil {
+	if err := d.DeviceSet.MountDevice(id, mp, parentMP, mountLabel); err != nil {
 		d.ctr.Decrement(mp)
 		return "", err
 	}
 
 	if err := idtools.MkdirAllAs(rootFs, 0755, uid, gid); err != nil && !os.IsExist(err) {
 		d.ctr.Decrement(mp)
-		d.DeviceSet.UnmountDevice(id, mp)
+		d.DeviceSet.UnmountDevice(id, mp, shared)
 		return "", err
 	}
 
@@ -199,7 +234,7 @@ func (d *Driver) Get(id, mountLabel string) (string, error) {
 		// of later problems
 		if err := ioutil.WriteFile(idFile, []byte(id), 0600); err != nil {
 			d.ctr.Decrement(mp)
-			d.DeviceSet.UnmountDevice(id, mp)
+			d.DeviceSet.UnmountDevice(id, mp, shared)
 			return "", err
 		}
 	}
@@ -207,13 +242,22 @@ func (d *Driver) Get(id, mountLabel string) (string, error) {
 	return rootFs, nil
 }
 
+func (d *Driver) PutShared(id string) error {
+	return d.put(id, true)
+}
+
 // Put unmounts a device and removes it.
 func (d *Driver) Put(id string) error {
+	return d.put(id, false)
+}
+
+// Put unmounts a device and removes it.
+func (d *Driver) put(id string, shared bool) error {
 	mp := path.Join(d.home, "mnt", id)
 	if count := d.ctr.Decrement(mp); count > 0 {
 		return nil
 	}
-	err := d.DeviceSet.UnmountDevice(id, mp)
+	err := d.DeviceSet.UnmountDevice(id, mp, shared)
 	if err != nil {
 		logrus.Errorf("devmapper: Error unmounting device %s: %s", id, err)
 	}

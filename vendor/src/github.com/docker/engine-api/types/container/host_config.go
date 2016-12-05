@@ -302,6 +302,7 @@ type HostConfig struct {
 	Privileged      bool              // Is the container in privileged mode
 	PublishAllPorts bool              // Should docker publish all exposed port for the container
 	ReadonlyRootfs  bool              // Is the container root filesystem in read-only
+	SharedRootfs    bool              // Is the container root filesystem shared
 	SecurityOpt     []string          // List of string values to customize labels for MLS systems, such as SELinux.
 	StorageOpt      map[string]string `json:",omitempty"` // Storage driver options per container.
 	Tmpfs           map[string]string `json:",omitempty"` // List of tmpfs (mounts) used for the container

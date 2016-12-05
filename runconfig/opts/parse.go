@@ -91,6 +91,7 @@ type ContainerOptions struct {
 	flPidsLimit         int64
 	flRestartPolicy     string
 	flReadonlyRootfs    bool
+	flSharedRootfs      bool
 	flLoggingDriver     string
 	flCgroupParent      string
 	flVolumeDriver      string
@@ -156,6 +157,7 @@ func AddFlags(flags *pflag.FlagSet) *ContainerOptions {
 	flags.VarP(&copts.flLabels, "label", "l", "Set meta data on a container")
 	flags.Var(&copts.flLabelsFile, "label-file", "Read in a line delimited file of labels")
 	flags.BoolVar(&copts.flReadonlyRootfs, "read-only", false, "Mount the container's root filesystem as read only")
+	flags.BoolVar(&copts.flSharedRootfs, "shared-rootfs", false, "Container's root filesystem is shared with other containers. Works only with read-only containers.")
 	flags.StringVar(&copts.flRestartPolicy, "restart", "no", "Restart policy to apply when a container exits")
 	flags.StringVar(&copts.flStopSignal, "stop-signal", signal.DefaultStopSignal, fmt.Sprintf("Signal to stop a container, %v by default", signal.DefaultStopSignal))
 	flags.Var(copts.flSysctls, "sysctl", "Sysctl options")
@@ -492,6 +494,10 @@ func Parse(flags *pflag.FlagSet, copts *ContainerOptions) (*container.Config, *c
 		}
 	}
 
+	if copts.flSharedRootfs && !copts.flReadonlyRootfs {
+		return nil, nil, nil, fmt.Errorf("--shared-rootfs can be used only with --read-only option")
+	}
+
 	resources := container.Resources{
 		CgroupParent:         copts.flCgroupParent,
 		Memory:               flMemory,
@@ -576,6 +582,7 @@ func Parse(flags *pflag.FlagSet, copts *ContainerOptions) (*container.Config, *c
 		SecurityOpt:    securityOpts,
 		StorageOpt:     storageOpts,
 		ReadonlyRootfs: copts.flReadonlyRootfs,
+		SharedRootfs:   copts.flSharedRootfs,
 		LogConfig:      container.LogConfig{Type: copts.flLoggingDriver, Config: loggingOpts},
 		VolumeDriver:   copts.flVolumeDriver,
 		Isolation:      container.Isolation(copts.flIsolation),

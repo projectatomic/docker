@@ -374,6 +374,10 @@ func (d *Driver) subvolumesDirID(id string) string {
 	return path.Join(d.subvolumesDir(), id)
 }
 
+func (a *Driver) CreateShared(id, parent, mountLabel string, storageOpt map[string]string) error {
+	return graphdriver.CreateSharedNotSupported("btrfs")
+}
+
 // CreateReadWrite creates a layer that is writable for use as a container
 // file system.
 func (d *Driver) CreateReadWrite(id, parent, mountLabel string, storageOpt map[string]string) error {
@@ -472,6 +476,10 @@ func (d *Driver) setStorageSize(dir string, driver *Driver) error {
 	return nil
 }
 
+func (d *Driver) RemoveShared(id string) error {
+	return graphdriver.RemoveSharedNotSupported("btrfs")
+}
+
 // Remove the filesystem with given id.
 func (d *Driver) Remove(id string) error {
 	dir := d.subvolumesDirID(id)
@@ -490,6 +498,10 @@ func (d *Driver) Remove(id string) error {
 	return nil
 }
 
+func (a *Driver) GetShared(id, parentPath string) (string, error) {
+	return "", graphdriver.GetSharedNotSupported("btrfs")
+}
+
 // Get the requested filesystem id.
 func (d *Driver) Get(id, mountLabel string) (string, error) {
 	dir := d.subvolumesDirID(id)
@@ -503,6 +515,10 @@ func (d *Driver) Get(id, mountLabel string) (string, error) {
 	}
 
 	return dir, nil
+}
+
+func (a *Driver) PutShared(id string) error {
+	return graphdriver.PutSharedNotSupported("btrfs")
 }
 
 // Put is not implemented for BTRFS as there is no cleanup required for the id.
