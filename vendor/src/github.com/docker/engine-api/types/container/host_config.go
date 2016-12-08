@@ -65,6 +65,30 @@ func (n IpcMode) Container() string {
 	return ""
 }
 
+// UsernsMode represents userns mode in the container.
+type UsernsMode string
+
+// IsHost indicates whether the container uses the host's userns.
+func (n UsernsMode) IsHost() bool {
+	return n == "host"
+}
+
+// IsPrivate indicates whether the container uses the a private userns.
+func (n UsernsMode) IsPrivate() bool {
+	return !(n.IsHost())
+}
+
+// Valid indicates whether the userns is valid.
+func (n UsernsMode) Valid() bool {
+	parts := strings.Split(string(n), ":")
+	switch mode := parts[0]; mode {
+	case "", "host":
+	default:
+		return false
+	}
+	return true
+}
+
 // UTSMode represents the UTS namespace of the container.
 type UTSMode string
 
@@ -161,6 +185,7 @@ type LogConfig struct {
 type Resources struct {
 	// Applicable to all platforms
 	CPUShares int64 `json:"CpuShares"` // CPU shares (relative weight vs. other containers)
+	Memory    int64 // Memory limit (in bytes)
 
 	// Applicable to UNIX platforms
 	CgroupParent         string // Parent cgroup.
@@ -176,7 +201,6 @@ type Resources struct {
 	CpusetMems           string          // CpusetMems 0-2, 0,1
 	Devices              []DeviceMapping // List of devices to map inside the container
 	KernelMemory         int64           // Kernel memory limit (in bytes)
-	Memory               int64           // Memory limit (in bytes)
 	MemoryReservation    int64           // Memory soft limit (in bytes)
 	MemorySwap           int64           // Total memory usage (memory + swap); set `-1` to disable swap
 	MemorySwappiness     *int64          // Tuning container memory swappiness behaviour
@@ -224,6 +248,7 @@ type HostConfig struct {
 	SecurityOpt     []string           // List of string values to customize labels for MLS systems, such as SELinux.
 	Tmpfs           map[string]string  `json:",omitempty"` // List of tmpfs (mounts) used for the container
 	UTSMode         UTSMode            // UTS namespace to use for the container
+	UsernsMode      UsernsMode         `json:",omitempty"` // The user namespace to use for the container
 	ShmSize         int64              // Total shm memory usage
 	Sysctls         map[string]string  `json:",omitempty"` // List of Namespaced sysctls used for the container
 	// Applicable to Windows

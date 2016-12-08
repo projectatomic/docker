@@ -83,6 +83,9 @@ Creates a new container.
       --sysctl[=*[]*]]              Configure namespaced kernel parameters at runtime
       -t, --tty                     Allocate a pseudo-TTY
       -u, --user=""                 Username or UID
+      --userns=""                   Container user namespace
+                                    'host': Use the Docker host user namespace
+                                    '': Use the Docker daemon user namespace specified by `--userns-remap` option.
       --ulimit=[]                   Ulimit options
       --uts=""                      UTS namespace to use
       -v, --volume=[host-src:]container-dest[:<options>]

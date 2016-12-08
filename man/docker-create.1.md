@@ -58,6 +58,7 @@ docker-create - Create a new container
 [**-P**|**--publish-all**]
 [**-p**|**--publish**[=*[]*]]
 [**--pid**[=*[]*]]
+[**--userns**[=*[]*]]
 [**--privileged**]
 [**--read-only**]
 [**--restart**[=*RESTART*]]
@@ -290,6 +291,10 @@ unit, `b` is used. Set LIMIT to `-1` to enable unlimited swap.
    Set the PID mode for the container
      **host**: use the host's PID namespace inside the container.
      Note: the host mode gives the container full access to local PID and is therefore considered insecure.
+
+**--userns**=""
+   Set the usernamespace mode for the container when `userns-remap` option is enabled.
+     **host**: use the host usernamespace and enable all privileged options (e.g., `pid=host` or `--privileged`).
 
 **--privileged**=*true*|*false*
    Give extended privileges to this container. The default is *false*.
