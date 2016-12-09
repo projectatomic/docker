@@ -3,6 +3,7 @@ package main
 import (
 	"github.com/docker/docker/daemon/config"
 	"github.com/docker/docker/opts"
+	"github.com/docker/docker/registry"
 	"github.com/spf13/pflag"
 )
 
@@ -52,4 +53,5 @@ func installCommonConfigFlags(conf *config.Config, flags *pflag.FlagSet) {
 
 	flags.Var(opts.NewListOptsRef(&conf.BlockedRegistries, registry.ValidateIndexName), "block-registry", "Don't contact given registry")
 	flags.Var(opts.NewListOptsRef(&conf.AdditionalRegistries, registry.ValidateIndexName), "add-registry", "Registry to query before a public one")
+	flags.BoolVar(&conf.SkipSchemaV2Push, "skip-schema2-push", false, "override push behavior to push only schema1 manifests")
 }

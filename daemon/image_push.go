@@ -50,6 +50,7 @@ func (daemon *Daemon) PushImage(ctx context.Context, image, tag string, metaHead
 			ImageStore:       distribution.NewImageConfigStoreFromStore(daemon.imageStore),
 			ReferenceStore:   daemon.referenceStore,
 		},
+		SkipSchemaV2:    daemon.configStore.SkipSchemaV2Push,
 		ConfigMediaType: schema2.MediaTypeImageConfig,
 		LayerStore:      distribution.NewLayerProviderFromStore(daemon.layerStore),
 		TrustKey:        daemon.trustKey,
