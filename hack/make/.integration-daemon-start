@@ -16,6 +16,8 @@ if [ "$(go env GOOS)" = 'windows' ]; then
        return
 fi
 
+install_policy "$base/../../policy.json"
+
 if [ -z "$DOCKER_TEST_HOST" ]; then
 	if docker version &> /dev/null; then
 		echo >&2 'skipping daemon start, since daemon appears to be already started'

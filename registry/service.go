@@ -35,6 +35,7 @@ type Service interface {
 	TLSConfig(hostname string) (*tls.Config, error)
 	LoadMirrors([]string) error
 	LoadInsecureRegistries([]string) error
+	SecureIndex(hostname string) bool
 }
 
 // DefaultService is a registry service. It tracks configuration data such as a list
@@ -451,6 +452,12 @@ func (s *DefaultService) TLSConfig(hostname string) (*tls.Config, error) {
 	defer s.mu.Unlock()
 
 	return newTLSConfig(hostname, isSecureIndex(s.config, hostname))
+}
+
+// SecureIndex returns true if the index is secure according to the config.
+// false otherwise.
+func (s *DefaultService) SecureIndex(hostname string) bool {
+	return isSecureIndex(s.config, hostname)
 }
 
 // tlsConfig constructs a client TLS configuration based on server defaults

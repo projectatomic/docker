@@ -3840,6 +3840,7 @@ func (s *DockerSuite) TestRunInvalidReference(c *check.C) {
 
 // Test fix for issue #17854
 func (s *DockerSuite) TestRunInitLayerPathOwnership(c *check.C) {
+	c.Skip("flaky")
 	// Not applicable on Windows as it does not support Linux uid/gid ownership
 	testRequires(c, DaemonIsLinux)
 	name := "testetcfileownership"

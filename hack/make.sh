@@ -259,6 +259,18 @@ install_binary() {
 	fi
 }
 
+install_policy() {
+	file="$1"
+	target="/etc/containers/policy.json"
+	if [ "$(go env GOOS)" == "linux"  ]; then
+		if [ ! -e "/etc/containers/policy.json" ]; then
+			echo "Installing $(basename $file) to ${target}"
+			mkdir -p /etc/containers
+			cp -L "$file" "$target"
+		fi
+	fi
+}
+
 main() {
 	# We want this to fail if the bundles already exist and cannot be removed.
 	# This is to avoid mixing bundles from different versions of the code.

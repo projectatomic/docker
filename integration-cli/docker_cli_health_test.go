@@ -2,7 +2,6 @@ package main
 
 import (
 	"encoding/json"
-
 	"strconv"
 	"strings"
 	"time"
@@ -37,6 +36,7 @@ func getHealth(c *check.C, name string) *types.Health {
 }
 
 func (s *DockerSuite) TestHealth(c *check.C) {
+	c.Skip("flaky")
 	testRequires(c, DaemonIsLinux) // busybox doesn't work on Windows
 
 	imageName := "testhealth"

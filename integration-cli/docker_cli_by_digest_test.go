@@ -556,7 +556,7 @@ func (s *DockerRegistrySuite) TestPullFailsWithAlteredManifest(c *check.C) {
 	out, exitStatus, _ := dockerCmdWithError("pull", imageReference)
 	c.Assert(exitStatus, checker.Not(check.Equals), 0)
 
-	expectedErrorMsg := fmt.Sprintf("manifest verification failed for digest %s", manifestDigest)
+	expectedErrorMsg := fmt.Sprintf("Manifest does not match provided manifest digest %s", manifestDigest)
 	c.Assert(out, checker.Contains, expectedErrorMsg)
 }
 
@@ -598,7 +598,7 @@ func (s *DockerSchema1RegistrySuite) TestPullFailsWithAlteredManifest(c *check.C
 	out, exitStatus, _ := dockerCmdWithError("pull", imageReference)
 	c.Assert(exitStatus, checker.Not(check.Equals), 0)
 
-	expectedErrorMsg := fmt.Sprintf("image verification failed for digest %s", manifestDigest)
+	expectedErrorMsg := fmt.Sprintf("Manifest does not match provided manifest digest %s", manifestDigest)
 	c.Assert(out, checker.Contains, expectedErrorMsg)
 }
 

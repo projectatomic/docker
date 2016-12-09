@@ -47,6 +47,7 @@ func installConfigFlags(conf *config.Config, flags *pflag.FlagSet) {
 	flags.StringVar(&conf.SeccompProfile, "seccomp-profile", "", "Path to seccomp profile")
 	flags.Var(&conf.ShmSize, "default-shm-size", "Default shm size for containers")
 	flags.BoolVar(&conf.EnableSecrets, "enable-secrets", true, "Enable Secrets")
+	flags.BoolVar(&conf.SigCheck, "signature-verification", true, "Check image's signatures on pull")
 
 	attachExperimentalFlags(conf, flags)
 }
