@@ -259,6 +259,13 @@ func (s *journald) followJournal(logWatcher *logger.LogWatcher, config logger.Re
 			errstr := C.GoString(cerrstr)
 			fmtstr := "error %q while attempting to follow journal for container %q"
 			logrus.Errorf(fmtstr, errstr, s.vars["CONTAINER_ID_FULL"])
+		} else {
+			// In the event that we were told to stop (logWatcher.WatchClose() below), it's possible
+			// there's more data in the journal for this container that was written just as the container
+			// exited. Try to drain the journal one more time to pick up any last-minute journal entries.
+			// Note, this isn't fool-proof and there's no guarantee that we'll get all the trailing
+			// entries, but this is better than nothing, as it does yield entries more often than not.
+			s.drainJournal(logWatcher, config, j, cursor)
 		}
 		// Clean up.
 		C.close(pfd[0])
