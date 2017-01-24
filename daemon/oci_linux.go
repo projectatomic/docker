@@ -253,6 +253,29 @@ func setNamespaces(daemon *Daemon, s *specs.Spec, c *container.Container) error 
 			s.Linux.UIDMappings = specMapping(uidMap)
 			s.Linux.GIDMappings = specMapping(gidMap)
 		}
+		if daemon.RemapGroupAdds() {
+			groupPath, err := user.GetGroupPath()
+			if err != nil {
+				return err
+			}
+			groupFile, err := readUserFile(c, groupPath)
+			if err == nil {
+				defer groupFile.Close()
+			}
+			if len(c.HostConfig.GroupAdd) > 0 {
+				addGroups, err := user.GetAdditionalGroups(c.HostConfig.GroupAdd, groupFile)
+				if err != nil {
+					return err
+				}
+				for _, g := range addGroups {
+					s.Linux.GIDMappings = append(s.Linux.GIDMappings, specs.IDMapping{
+						HostID:      uint32(g),
+						ContainerID: uint32(g),
+						Size:        1,
+					})
+				}
+			}
+		}
 	}
 	// network
 	if !c.Config.NetworkDisabled {

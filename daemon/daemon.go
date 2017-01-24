@@ -92,6 +92,7 @@ type Daemon struct {
 	shutdown                  bool
 	uidMaps                   []idtools.IDMap
 	gidMaps                   []idtools.IDMap
+	remapGroupAdds            bool
 	layerStore                layer.Store
 	imageStore                image.Store
 	nameIndex                 *registrar.Registrar
@@ -421,6 +422,10 @@ func NewDaemon(config *Config, registryService registry.Service, containerdRemot
 		return nil, err
 	}
 
+	if config.RemapGroupAdds && config.RemappedRoot == "" {
+		return nil, fmt.Errorf("--userns-remap-group-adds can only be set when --userns-remap is configured")
+	}
+
 	// get the canonical path to the Docker root directory
 	var realRoot string
 	if _, err := os.Stat(config.Root); err != nil && os.IsNotExist(err) {
@@ -589,6 +594,7 @@ func NewDaemon(config *Config, registryService registry.Service, containerdRemot
 	d.root = config.Root
 	d.uidMaps = uidMaps
 	d.gidMaps = gidMaps
+	d.remapGroupAdds = config.RemapGroupAdds
 	d.seccompEnabled = sysInfo.Seccomp
 
 	d.nameIndex = registrar.NewRegistrar()
@@ -1084,6 +1090,10 @@ func (daemon *Daemon) networkOptions(dconfig *Config, activeSandboxes map[string
 	}
 
 	return options, nil
+}
+
+func (daemon *Daemon) RemapGroupAdds() bool {
+	return daemon.remapGroupAdds
 }
 
 func copyBlkioEntry(entries []*containerd.BlkioStatsEntry) []types.BlkioStatEntry {
