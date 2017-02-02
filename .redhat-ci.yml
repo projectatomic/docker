@@ -1,0 +1,7 @@
+host:
+  distro: fedora/25/atomic
+  specs:
+    ram: 4096
+
+tests:
+  - make test
