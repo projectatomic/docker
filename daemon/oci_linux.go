@@ -275,6 +275,9 @@ func setNamespaces(daemon *Daemon, s *specs.Spec, c *container.Container) error 
 					})
 				}
 			}
+			if len(s.Linux.GIDMappings) > 5 {
+				return fmt.Errorf("cannot exceed 5 gid mappings")
+			}
 		}
 	}
 	// network
