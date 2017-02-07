@@ -91,7 +91,7 @@ func (config *Config) InstallFlags(cmd *flag.FlagSet, usageFn func(string) strin
 	cmd.BoolVar(&config.EnableSecrets, []string{"-enable-secrets"}, true, usageFn("Enable Secrets"))
 	cmd.StringVar(&config.CgroupParent, []string{"-cgroup-parent"}, "", usageFn("Set parent cgroup for all containers"))
 	cmd.StringVar(&config.RemappedRoot, []string{"-userns-remap"}, "", usageFn("User/Group setting for user namespaces"))
-	cmd.BoolVar(&config.RemapGroupAdds, []string{"-userns-remap-group-adds"}, false, usageFn("Add user namespace gid mapping for group-adds"))
+	cmd.BoolVar(&config.RemapGroupAdds, []string{"#-userns-remap-group-adds"}, false, usageFn("Add user namespace gid mapping for group-adds (experimental)"))
 	cmd.StringVar(&config.ContainerdAddr, []string{"-containerd"}, "", usageFn("Path to containerd socket"))
 	cmd.BoolVar(&config.LiveRestore, []string{"-live-restore"}, false, usageFn("Enable live restore of docker when containers are still running"))
 	config.Runtimes = make(map[string]types.Runtime)
