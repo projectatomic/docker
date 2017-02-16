@@ -4,4 +4,6 @@ host:
     ram: 4096
 
 tests:
-  - make test
+  - docker run --rm --privileged -v $PWD:/code --workdir /code fedora:25
+    sh -c 'dnf install -y golang && (go run ./distros/gen_dockerfile.go > f)'
+  - make test DOCKERFILE=$(cat f)
