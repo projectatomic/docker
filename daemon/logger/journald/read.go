@@ -264,7 +264,7 @@ func (s *journald) followJournal(logWatcher *logger.LogWatcher, config logger.Re
 			// exited. Try to drain the journal one more time to pick up any last-minute journal entries.
 			// Note, this isn't fool-proof and there's no guarantee that we'll get all the trailing
 			// entries, but this is better than nothing, as it does yield entries more often than not.
-			s.drainJournal(logWatcher, config, j, cursor)
+			cursor = s.drainJournal(logWatcher, config, j, cursor)
 		}
 		// Clean up.
 		C.close(pfd[0])
