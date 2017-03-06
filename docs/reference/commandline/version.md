@@ -10,7 +10,7 @@ title: docker version
 ```markdown
 Usage:  docker version [OPTIONS]
 
-Show the Docker version information
+Show the jbieren Docker version information
 
 Options:
   -f, --format string   Format the output using the given go template

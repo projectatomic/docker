@@ -2,7 +2,7 @@
 % Docker Community
 % JUNE 2015
 # NAME
-docker-version - Show the Docker version information.
+docker-version - Show the jbieren Docker version information.
 
 # SYNOPSIS
 **docker version**

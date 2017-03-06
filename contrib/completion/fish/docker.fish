@@ -394,7 +394,7 @@ complete -c docker -f -n '__fish_docker_no_subcommand' -a unpause -d 'Unpause a 
 complete -c docker -A -f -n '__fish_seen_subcommand_from unpause' -a '(__fish_print_docker_containers running)' -d "Container"
 
 # version
-complete -c docker -f -n '__fish_docker_no_subcommand' -a version -d 'Show the Docker version information'
+complete -c docker -f -n '__fish_docker_no_subcommand' -a version -d 'Show the jbieren Docker version information'
 
 # wait
 complete -c docker -f -n '__fish_docker_no_subcommand' -a wait -d 'Block until a container stops, then print its exit code'
