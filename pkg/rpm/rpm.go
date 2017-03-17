@@ -1,9 +1,12 @@
 package rpm
 
 import (
+	"bytes"
+	"errors"
 	"os/exec"
 	"path/filepath"
 	"strings"
+	"time"
 )
 
 // Version returns package version for the specified package or executable path
@@ -16,6 +19,24 @@ func Version(name string) (string, error) {
 	if err != nil {
 		return "", err
 	}
-	out, err := exec.Command(rpmPath, options, name).Output()
-	return strings.TrimSpace(string(out)), err
+
+	cmd := exec.Command(rpmPath, options, name)
+
+	var out bytes.Buffer
+	cmd.Stdout = &out
+
+	cmd.Start()
+
+	done := make(chan error)
+	go func() { done <- cmd.Wait() }()
+
+	timeout := time.After(10 * time.Second)
+
+	select {
+	case <-timeout:
+		cmd.Process.Kill()
+		return "rpm timed out", errors.New("rpm timed out")
+	case err := <-done:
+		return strings.TrimSpace(out.String()), err
+	}
 }
