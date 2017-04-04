@@ -16,7 +16,7 @@ package v1
 
 import "github.com/opencontainers/image-spec/specs-go"
 
-// Manifest defines a schema2 manifest
+// Manifest provides `application/vnd.oci.image.manifest.list.v1+json` mediatype structure when marshalled to JSON.
 type Manifest struct {
 	specs.Versioned
 
@@ -28,5 +28,5 @@ type Manifest struct {
 	Layers []Descriptor `json:"layers"`
 
 	// Annotations contains arbitrary metadata for the manifest list.
-	Annotations map[string]string `json:"annotations"`
+	Annotations map[string]string `json:"annotations,omitempty"`
 }

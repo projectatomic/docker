@@ -15,7 +15,6 @@ package signature
 
 import (
 	"encoding/json"
-	"errors"
 	"fmt"
 	"io/ioutil"
 	"path/filepath"
@@ -23,6 +22,7 @@ import (
 	"github.com/containers/image/docker/reference"
 	"github.com/containers/image/transports"
 	"github.com/containers/image/types"
+	"github.com/pkg/errors"
 )
 
 // systemDefaultPolicyPath is the policy path used for DefaultPolicy().
@@ -40,8 +40,6 @@ type InvalidPolicyFormatError string
 func (err InvalidPolicyFormatError) Error() string {
 	return string(err)
 }
-
-// FIXME: NewDefaultPolicy, from default file (or environment if trusted?)
 
 // DefaultPolicy returns the default policy of the system.
 // Most applications should be using this method to get the policy configured
@@ -124,10 +122,8 @@ func (m *policyTransportsMap) UnmarshalJSON(data []byte) error {
 	// So, use a temporary map of pointers-to-slices and convert.
 	tmpMap := map[string]*PolicyTransportScopes{}
 	if err := paranoidUnmarshalJSONObject(data, func(key string) interface{} {
-		transport, ok := transports.KnownTransports[key]
-		if !ok {
-			return nil
-		}
+		// transport can be nil
+		transport := transports.Get(key)
 		// paranoidUnmarshalJSONObject detects key duplication for us, check just to be safe.
 		if _, ok := tmpMap[key]; ok {
 			return nil
@@ -157,7 +153,7 @@ func (m *PolicyTransportScopes) UnmarshalJSON(data []byte) error {
 }
 
 // policyTransportScopesWithTransport is a way to unmarshal a PolicyTransportScopes
-// while validating using a specific ImageTransport.
+// while validating using a specific ImageTransport if not nil.
 type policyTransportScopesWithTransport struct {
 	transport types.ImageTransport
 	dest      *PolicyTransportScopes
@@ -176,7 +172,7 @@ func (m *policyTransportScopesWithTransport) UnmarshalJSON(data []byte) error {
 		if _, ok := tmpMap[key]; ok {
 			return nil
 		}
-		if key != "" {
+		if key != "" && m.transport != nil {
 			if err := m.transport.ValidatePolicyConfigurationScope(key); err != nil {
 				return nil
 			}
@@ -259,13 +255,8 @@ var _ json.Unmarshaler = (*prInsecureAcceptAnything)(nil)
 func (pr *prInsecureAcceptAnything) UnmarshalJSON(data []byte) error {
 	*pr = prInsecureAcceptAnything{}
 	var tmp prInsecureAcceptAnything
-	if err := paranoidUnmarshalJSONObject(data, func(key string) interface{} {
-		switch key {
-		case "type":
-			return &tmp.Type
-		default:
-			return nil
-		}
+	if err := paranoidUnmarshalJSONObjectExactFields(data, map[string]interface{}{
+		"type": &tmp.Type,
 	}); err != nil {
 		return err
 	}
@@ -294,13 +285,8 @@ var _ json.Unmarshaler = (*prReject)(nil)
 func (pr *prReject) UnmarshalJSON(data []byte) error {
 	*pr = prReject{}
 	var tmp prReject
-	if err := paranoidUnmarshalJSONObject(data, func(key string) interface{} {
-		switch key {
-		case "type":
-			return &tmp.Type
-		default:
-			return nil
-		}
+	if err := paranoidUnmarshalJSONObjectExactFields(data, map[string]interface{}{
+		"type": &tmp.Type,
 	}); err != nil {
 		return err
 	}
@@ -407,7 +393,7 @@ func (pr *prSignedBy) UnmarshalJSON(data []byte) error {
 	case !gotKeyPath && !gotKeyData:
 		return InvalidPolicyFormatError("At least one of keyPath and keyData mus be specified")
 	default: // Coverage: This should never happen
-		return fmt.Errorf("Impossible keyPath/keyData presence combination!?")
+		return errors.Errorf("Impossible keyPath/keyData presence combination!?")
 	}
 	if err != nil {
 		return err
@@ -469,24 +455,15 @@ func (pr *prSignedBaseLayer) UnmarshalJSON(data []byte) error {
 	*pr = prSignedBaseLayer{}
 	var tmp prSignedBaseLayer
 	var baseLayerIdentity json.RawMessage
-	if err := paranoidUnmarshalJSONObject(data, func(key string) interface{} {
-		switch key {
-		case "type":
-			return &tmp.Type
-		case "baseLayerIdentity":
-			return &baseLayerIdentity
-		default:
-			return nil
-		}
+	if err := paranoidUnmarshalJSONObjectExactFields(data, map[string]interface{}{
+		"type":              &tmp.Type,
+		"baseLayerIdentity": &baseLayerIdentity,
 	}); err != nil {
 		return err
 	}
 
 	if tmp.Type != prTypeSignedBaseLayer {
 		return InvalidPolicyFormatError(fmt.Sprintf("Unexpected policy requirement type \"%s\"", tmp.Type))
-	}
-	if baseLayerIdentity == nil {
-		return InvalidPolicyFormatError(fmt.Sprintf("baseLayerIdentity not specified"))
 	}
 	bli, err := newPolicyReferenceMatchFromJSON(baseLayerIdentity)
 	if err != nil {
@@ -545,13 +522,8 @@ var _ json.Unmarshaler = (*prmMatchExact)(nil)
 func (prm *prmMatchExact) UnmarshalJSON(data []byte) error {
 	*prm = prmMatchExact{}
 	var tmp prmMatchExact
-	if err := paranoidUnmarshalJSONObject(data, func(key string) interface{} {
-		switch key {
-		case "type":
-			return &tmp.Type
-		default:
-			return nil
-		}
+	if err := paranoidUnmarshalJSONObjectExactFields(data, map[string]interface{}{
+		"type": &tmp.Type,
 	}); err != nil {
 		return err
 	}
@@ -580,13 +552,8 @@ var _ json.Unmarshaler = (*prmMatchRepoDigestOrExact)(nil)
 func (prm *prmMatchRepoDigestOrExact) UnmarshalJSON(data []byte) error {
 	*prm = prmMatchRepoDigestOrExact{}
 	var tmp prmMatchRepoDigestOrExact
-	if err := paranoidUnmarshalJSONObject(data, func(key string) interface{} {
-		switch key {
-		case "type":
-			return &tmp.Type
-		default:
-			return nil
-		}
+	if err := paranoidUnmarshalJSONObjectExactFields(data, map[string]interface{}{
+		"type": &tmp.Type,
 	}); err != nil {
 		return err
 	}
@@ -615,13 +582,8 @@ var _ json.Unmarshaler = (*prmMatchRepository)(nil)
 func (prm *prmMatchRepository) UnmarshalJSON(data []byte) error {
 	*prm = prmMatchRepository{}
 	var tmp prmMatchRepository
-	if err := paranoidUnmarshalJSONObject(data, func(key string) interface{} {
-		switch key {
-		case "type":
-			return &tmp.Type
-		default:
-			return nil
-		}
+	if err := paranoidUnmarshalJSONObjectExactFields(data, map[string]interface{}{
+		"type": &tmp.Type,
 	}); err != nil {
 		return err
 	}
@@ -635,7 +597,7 @@ func (prm *prmMatchRepository) UnmarshalJSON(data []byte) error {
 
 // newPRMExactReference is NewPRMExactReference, except it resturns the private type.
 func newPRMExactReference(dockerReference string) (*prmExactReference, error) {
-	ref, err := reference.ParseNamed(dockerReference)
+	ref, err := reference.ParseNormalizedNamed(dockerReference)
 	if err != nil {
 		return nil, InvalidPolicyFormatError(fmt.Sprintf("Invalid format of dockerReference %s: %s", dockerReference, err.Error()))
 	}
@@ -660,15 +622,9 @@ var _ json.Unmarshaler = (*prmExactReference)(nil)
 func (prm *prmExactReference) UnmarshalJSON(data []byte) error {
 	*prm = prmExactReference{}
 	var tmp prmExactReference
-	if err := paranoidUnmarshalJSONObject(data, func(key string) interface{} {
-		switch key {
-		case "type":
-			return &tmp.Type
-		case "dockerReference":
-			return &tmp.DockerReference
-		default:
-			return nil
-		}
+	if err := paranoidUnmarshalJSONObjectExactFields(data, map[string]interface{}{
+		"type":            &tmp.Type,
+		"dockerReference": &tmp.DockerReference,
 	}); err != nil {
 		return err
 	}
@@ -687,7 +643,7 @@ func (prm *prmExactReference) UnmarshalJSON(data []byte) error {
 
 // newPRMExactRepository is NewPRMExactRepository, except it resturns the private type.
 func newPRMExactRepository(dockerRepository string) (*prmExactRepository, error) {
-	if _, err := reference.ParseNamed(dockerRepository); err != nil {
+	if _, err := reference.ParseNormalizedNamed(dockerRepository); err != nil {
 		return nil, InvalidPolicyFormatError(fmt.Sprintf("Invalid format of dockerRepository %s: %s", dockerRepository, err.Error()))
 	}
 	return &prmExactRepository{
@@ -708,15 +664,9 @@ var _ json.Unmarshaler = (*prmExactRepository)(nil)
 func (prm *prmExactRepository) UnmarshalJSON(data []byte) error {
 	*prm = prmExactRepository{}
 	var tmp prmExactRepository
-	if err := paranoidUnmarshalJSONObject(data, func(key string) interface{} {
-		switch key {
-		case "type":
-			return &tmp.Type
-		case "dockerRepository":
-			return &tmp.DockerRepository
-		default:
-			return nil
-		}
+	if err := paranoidUnmarshalJSONObjectExactFields(data, map[string]interface{}{
+		"type":             &tmp.Type,
+		"dockerRepository": &tmp.DockerRepository,
 	}); err != nil {
 		return err
 	}

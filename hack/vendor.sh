@@ -145,7 +145,7 @@ clone git github.com/golang/mock bd3c8e81be01eef76d4b503f5e687d2d1354d2d9
 clone git github.com/gogo/protobuf 43a2e0b1c32252bfbbdf81f7faa7a88fb3fa4028
 clone git github.com/cloudflare/cfssl b895b0549c0ff676f92cf09ba971ae02bb41367b
 clone git github.com/google/certificate-transparency 025a5cab06f6a819c455d9fdc9e2a1b6d0982284
-clone git golang.org/x/crypto 3fbbcd23f1cb824e69491a5930cfeff09b12f4d2 https://github.com/golang/crypto.git
+clone git golang.org/x/crypto master https://github.com/golang/crypto.git
 clone git github.com/mreiferson/go-httpclient 63fe23f7434723dc904c901043af07931f293c47
 clone git github.com/hashicorp/go-memdb 98f52f52d7a476958fa9da671354d270c50661a7
 clone git github.com/hashicorp/go-immutable-radix 8e8ed81f8f0bf1bdd829593fdd5c29922c1ea990
@@ -168,12 +168,13 @@ clone git github.com/inconshreveable/mousetrap 76626ae9c91c4f2a10f34cad8ce83ea42
 clone git github.com/flynn-archive/go-shlex 3f9db97f856818214da2e1057f8ad84803971cff
 
 # signatures
-clone git github.com/containers/image bad049ae43b296d84e83b204d27f7df8751b460d
-clone git github.com/opencontainers/image-spec 756744a5dcf23a6c8e4b11ef403522ca3ca33fd9
+clone git github.com/containers/image master
+clone git github.com/opencontainers/image-spec v1.0.0-rc4
 clone git k8s.io/kubernetes 4a3f9c5b19c7ff804cbc1bf37a15c044ca5d2353 https://github.com/openshift/kubernetes
 clone git github.com/golang/glog 44145f04b68cf362d9c4df2182967c2275eaefed
 clone git github.com/ghodss/yaml 73d445a93680fa1a78ae23a5839bad48f32ba1ee
 clone git gopkg.in/yaml.v2 d466437aa4adc35830964cffc5b5f262c63ddcb4
 clone git github.com/mtrmac/gpgme master
+clone git github.com/opencontainers/go-digest master
 
 clean

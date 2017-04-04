@@ -9,11 +9,12 @@ import (
 	"path/filepath"
 	"strings"
 
-	"github.com/docker/distribution/digest"
-	"github.com/ghodss/yaml"
-
 	"github.com/Sirupsen/logrus"
+	"github.com/containers/image/docker/reference"
 	"github.com/containers/image/types"
+	"github.com/ghodss/yaml"
+	"github.com/opencontainers/go-digest"
+	"github.com/pkg/errors"
 )
 
 // systemRegistriesDirPath is the path to registries.d, used for locating lookaside Docker signature storage.
@@ -60,12 +61,13 @@ func configuredSignatureStorageBase(ctx *types.SystemContext, ref dockerReferenc
 
 	url, err := url.Parse(topLevel)
 	if err != nil {
-		return nil, fmt.Errorf("Invalid signature storage URL %s: %v", topLevel, err)
+		return nil, errors.Wrapf(err, "Invalid signature storage URL %s", topLevel)
 	}
+	// NOTE: Keep this in sync with docs/signature-protocols.md!
 	// FIXME? Restrict to explicitly supported schemes?
-	repo := ref.ref.FullName()    // Note that this is without a tag or digest.
-	if path.Clean(repo) != repo { // Coverage: This should not be reachable because /./ and /../ components are not valid in docker references
-		return nil, fmt.Errorf("Unexpected path elements in Docker reference %s for signature storage", ref.ref.String())
+	repo := reference.Path(ref.ref) // Note that this is without a tag or digest.
+	if path.Clean(repo) != repo {   // Coverage: This should not be reachable because /./ and /../ components are not valid in docker references
+		return nil, errors.Errorf("Unexpected path elements in Docker reference %s for signature storage", ref.ref.String())
 	}
 	url.Path = url.Path + "/" + repo
 	return url, nil
@@ -114,12 +116,12 @@ func loadAndMergeConfig(dirPath string) (*registryConfiguration, error) {
 		var config registryConfiguration
 		err = yaml.Unmarshal(configBytes, &config)
 		if err != nil {
-			return nil, fmt.Errorf("Error parsing %s: %v", configPath, err)
+			return nil, errors.Wrapf(err, "Error parsing %s", configPath)
 		}
 
 		if config.DefaultDocker != nil {
 			if mergedConfig.DefaultDocker != nil {
-				return nil, fmt.Errorf(`Error parsing signature storage configuration: "default-docker" defined both in "%s" and "%s"`,
+				return nil, errors.Errorf(`Error parsing signature storage configuration: "default-docker" defined both in "%s" and "%s"`,
 					dockerDefaultMergedFrom, configPath)
 			}
 			mergedConfig.DefaultDocker = config.DefaultDocker
@@ -128,7 +130,7 @@ func loadAndMergeConfig(dirPath string) (*registryConfiguration, error) {
 
 		for nsName, nsConfig := range config.Docker { // includes config.Docker == nil
 			if _, ok := mergedConfig.Docker[nsName]; ok {
-				return nil, fmt.Errorf(`Error parsing signature storage configuration: "docker" namespace "%s" defined both in "%s" and "%s"`,
+				return nil, errors.Errorf(`Error parsing signature storage configuration: "docker" namespace "%s" defined both in "%s" and "%s"`,
 					nsName, nsMergedFrom[nsName], configPath)
 			}
 			mergedConfig.Docker[nsName] = nsConfig
@@ -189,11 +191,12 @@ func (ns registryNamespace) signatureTopLevel(write bool) string {
 
 // signatureStorageURL returns an URL usable for acessing signature index in base with known manifestDigest, or nil if not applicable.
 // Returns nil iff base == nil.
+// NOTE: Keep this in sync with docs/signature-protocols.md!
 func signatureStorageURL(base signatureStorageBase, manifestDigest digest.Digest, index int) *url.URL {
 	if base == nil {
 		return nil
 	}
 	url := *base
-	url.Path = fmt.Sprintf("%s@%s/signature-%d", url.Path, manifestDigest.String(), index+1)
+	url.Path = fmt.Sprintf("%s@%s=%s/signature-%d", url.Path, manifestDigest.Algorithm(), manifestDigest.Hex(), index+1)
 	return &url
 }

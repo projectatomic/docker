@@ -4,12 +4,13 @@ package signature
 
 import (
 	"encoding/json"
-	"errors"
 	"fmt"
 	"time"
 
+	"github.com/pkg/errors"
+
 	"github.com/containers/image/version"
-	"github.com/docker/distribution/digest"
+	"github.com/opencontainers/go-digest"
 )
 
 const (
@@ -26,37 +27,74 @@ func (err InvalidSignatureError) Error() string {
 }
 
 // Signature is a parsed content of a signature.
+// The only way to get this structure from a blob should be as a return value from a successful call to verifyAndExtractSignature below.
 type Signature struct {
 	DockerManifestDigest digest.Digest
 	DockerReference      string // FIXME: more precise type?
 }
 
-// Wrap signature to add to it some methods which we don't want to make public.
-type privateSignature struct {
-	Signature
+// untrustedSignature is a parsed content of a signature.
+type untrustedSignature struct {
+	UntrustedDockerManifestDigest digest.Digest
+	UntrustedDockerReference      string // FIXME: more precise type?
+	UntrustedCreatorID            *string
+	// This is intentionally an int64; the native JSON float64 type would allow to represent _some_ sub-second precision,
+	// but not nearly enough (with current timestamp values, a single unit in the last place is on the order of hundreds of nanoseconds).
+	// So, this is explicitly an int64, and we reject fractional values. If we did need more precise timestamps eventually,
+	// we would add another field, UntrustedTimestampNS int64.
+	UntrustedTimestamp *int64
 }
 
-// Compile-time check that privateSignature implements json.Marshaler
-var _ json.Marshaler = (*privateSignature)(nil)
+// UntrustedSignatureInformation is information available in an untrusted signature.
+// This may be useful when debugging signature verification failures,
+// or when managing a set of signatures on a single image.
+//
+// WARNING: Do not use the contents of this for ANY security decisions,
+// and be VERY CAREFUL about showing this information to humans in any way which suggest that these values “are probably” reliable.
+// There is NO REASON to expect the values to be correct, or not intentionally misleading
+// (including things like “✅ Verified by $authority”)
+type UntrustedSignatureInformation struct {
+	UntrustedDockerManifestDigest digest.Digest
+	UntrustedDockerReference      string // FIXME: more precise type?
+	UntrustedCreatorID            *string
+	UntrustedTimestamp            *time.Time
+	UntrustedShortKeyIdentifier   string
+}
+
+// newUntrustedSignature returns an untrustedSignature object with
+// the specified primary contents and appropriate metadata.
+func newUntrustedSignature(dockerManifestDigest digest.Digest, dockerReference string) untrustedSignature {
+	// Use intermediate variables for these values so that we can take their addresses.
+	// Golang guarantees that they will have a new address on every execution.
+	creatorID := "atomic " + version.Version
+	timestamp := time.Now().Unix()
+	return untrustedSignature{
+		UntrustedDockerManifestDigest: dockerManifestDigest,
+		UntrustedDockerReference:      dockerReference,
+		UntrustedCreatorID:            &creatorID,
+		UntrustedTimestamp:            &timestamp,
+	}
+}
+
+// Compile-time check that untrustedSignature implements json.Marshaler
+var _ json.Marshaler = (*untrustedSignature)(nil)
 
 // MarshalJSON implements the json.Marshaler interface.
-func (s privateSignature) MarshalJSON() ([]byte, error) {
-	return s.marshalJSONWithVariables(time.Now().UTC().Unix(), "atomic "+version.Version)
-}
-
-// Implementation of MarshalJSON, with a caller-chosen values of the variable items to help testing.
-func (s privateSignature) marshalJSONWithVariables(timestamp int64, creatorID string) ([]byte, error) {
-	if s.DockerManifestDigest == "" || s.DockerReference == "" {
+func (s untrustedSignature) MarshalJSON() ([]byte, error) {
+	if s.UntrustedDockerManifestDigest == "" || s.UntrustedDockerReference == "" {
 		return nil, errors.New("Unexpected empty signature content")
 	}
 	critical := map[string]interface{}{
 		"type":     signatureType,
-		"image":    map[string]string{"docker-manifest-digest": s.DockerManifestDigest.String()},
-		"identity": map[string]string{"docker-reference": s.DockerReference},
+		"image":    map[string]string{"docker-manifest-digest": s.UntrustedDockerManifestDigest.String()},
+		"identity": map[string]string{"docker-reference": s.UntrustedDockerReference},
 	}
-	optional := map[string]interface{}{
-		"creator":   creatorID,
-		"timestamp": timestamp,
+	optional := map[string]interface{}{}
+	if s.UntrustedCreatorID != nil {
+		optional["creator"] = *s.UntrustedCreatorID
+	}
+	if s.UntrustedTimestamp != nil {
+		optional["timestamp"] = *s.UntrustedTimestamp
 	}
 	signature := map[string]interface{}{
 		"critical": critical,
@@ -65,11 +103,11 @@ func (s privateSignature) marshalJSONWithVariables(timestamp int64, creatorID st
 	return json.Marshal(signature)
 }
 
-// Compile-time check that privateSignature implements json.Unmarshaler
-var _ json.Unmarshaler = (*privateSignature)(nil)
+// Compile-time check that untrustedSignature implements json.Unmarshaler
+var _ json.Unmarshaler = (*untrustedSignature)(nil)
 
 // UnmarshalJSON implements the json.Unmarshaler interface
-func (s *privateSignature) UnmarshalJSON(data []byte) error {
+func (s *untrustedSignature) UnmarshalJSON(data []byte) error {
 	err := s.strictUnmarshalJSON(data)
 	if err != nil {
 		if _, ok := err.(jsonFormatError); ok {
@@ -81,72 +119,81 @@ func (s *privateSignature) UnmarshalJSON(data []byte) error {
 
 // strictUnmarshalJSON is UnmarshalJSON, except that it may return the internal jsonFormatError error type.
 // Splitting it into a separate function allows us to do the jsonFormatError → InvalidSignatureError in a single place, the caller.
-func (s *privateSignature) strictUnmarshalJSON(data []byte) error {
-	var untyped interface{}
-	if err := json.Unmarshal(data, &untyped); err != nil {
-		return err
-	}
-	o, ok := untyped.(map[string]interface{})
-	if !ok {
-		return InvalidSignatureError{msg: "Invalid signature format"}
-	}
-	if err := validateExactMapKeys(o, "critical", "optional"); err != nil {
+func (s *untrustedSignature) strictUnmarshalJSON(data []byte) error {
+	var critical, optional json.RawMessage
+	if err := paranoidUnmarshalJSONObjectExactFields(data, map[string]interface{}{
+		"critical": &critical,
+		"optional": &optional,
+	}); err != nil {
 		return err
 	}
 
-	c, err := mapField(o, "critical")
-	if err != nil {
+	var creatorID string
+	var timestamp float64
+	var gotCreatorID, gotTimestamp = false, false
+	if err := paranoidUnmarshalJSONObject(optional, func(key string) interface{} {
+		switch key {
+		case "creator":
+			gotCreatorID = true
+			return &creatorID
+		case "timestamp":
+			gotTimestamp = true
+			return &timestamp
+		default:
+			var ignore interface{}
+			return &ignore
+		}
+	}); err != nil {
 		return err
 	}
-	if err := validateExactMapKeys(c, "type", "image", "identity"); err != nil {
-		return err
+	if gotCreatorID {
+		s.UntrustedCreatorID = &creatorID
+	}
+	if gotTimestamp {
+		intTimestamp := int64(timestamp)
+		if float64(intTimestamp) != timestamp {
+			return InvalidSignatureError{msg: "Field optional.timestamp is not is not an integer"}
+		}
+		s.UntrustedTimestamp = &intTimestamp
 	}
 
-	optional, err := mapField(o, "optional")
-	if err != nil {
-		return err
-	}
-	_ = optional // We don't use anything from here for now.
-
-	t, err := stringField(c, "type")
-	if err != nil {
+	var t string
+	var image, identity json.RawMessage
+	if err := paranoidUnmarshalJSONObjectExactFields(critical, map[string]interface{}{
+		"type":     &t,
+		"image":    &image,
+		"identity": &identity,
+	}); err != nil {
 		return err
 	}
 	if t != signatureType {
 		return InvalidSignatureError{msg: fmt.Sprintf("Unrecognized signature type %s", t)}
 	}
 
-	image, err := mapField(c, "image")
-	if err != nil {
+	var digestString string
+	if err := paranoidUnmarshalJSONObjectExactFields(image, map[string]interface{}{
+		"docker-manifest-digest": &digestString,
+	}); err != nil {
 		return err
 	}
-	if err := validateExactMapKeys(image, "docker-manifest-digest"); err != nil {
-		return err
-	}
-	digestString, err := stringField(image, "docker-manifest-digest")
-	if err != nil {
-		return err
-	}
-	s.DockerManifestDigest = digest.Digest(digestString)
+	s.UntrustedDockerManifestDigest = digest.Digest(digestString)
 
-	identity, err := mapField(c, "identity")
-	if err != nil {
+	if err := paranoidUnmarshalJSONObjectExactFields(identity, map[string]interface{}{
+		"docker-reference": &s.UntrustedDockerReference,
+	}); err != nil {
 		return err
 	}
-	if err := validateExactMapKeys(identity, "docker-reference"); err != nil {
-		return err
-	}
-	reference, err := stringField(identity, "docker-reference")
-	if err != nil {
-		return err
-	}
-	s.DockerReference = reference
 
 	return nil
 }
 
 // Sign formats the signature and returns a blob signed using mech and keyIdentity
-func (s privateSignature) sign(mech SigningMechanism, keyIdentity string) ([]byte, error) {
+// (If it seems surprising that this is a method on untrustedSignature, note that there
+// isn’t a good reason to think that a key used by the user is trusted by any component
+// of the system just because it is a private key — actually the presence of a private key
+// on the system increases the likelihood of an a successful attack on that private key
+// on that particular system.)
+func (s untrustedSignature) sign(mech SigningMechanism, keyIdentity string) ([]byte, error) {
 	json, err := json.Marshal(s)
 	if err != nil {
 		return nil, err
@@ -158,7 +205,7 @@ func (s privateSignature) sign(mech SigningMechanism, keyIdentity string) ([]byt
 // signatureAcceptanceRules specifies how to decide whether an untrusted signature is acceptable.
 // We centralize the actual parsing and data extraction in verifyAndExtractSignature; this supplies
 // the policy.  We use an object instead of supplying func parameters to verifyAndExtractSignature
-// because all of the functions have the same type, so there is a risk of exchanging the functions;
+// because the functions have the same or similar types, so there is a risk of exchanging the functions;
 // named members of this struct are more explicit.
 type signatureAcceptanceRules struct {
 	validateKeyIdentity                func(string) error
@@ -177,16 +224,59 @@ func verifyAndExtractSignature(mech SigningMechanism, unverifiedSignature []byte
 		return nil, err
 	}
 
-	var unmatchedSignature privateSignature
+	var unmatchedSignature untrustedSignature
 	if err := json.Unmarshal(signed, &unmatchedSignature); err != nil {
 		return nil, InvalidSignatureError{msg: err.Error()}
 	}
-	if err := rules.validateSignedDockerManifestDigest(unmatchedSignature.DockerManifestDigest); err != nil {
+	if err := rules.validateSignedDockerManifestDigest(unmatchedSignature.UntrustedDockerManifestDigest); err != nil {
 		return nil, err
 	}
-	if err := rules.validateSignedDockerReference(unmatchedSignature.DockerReference); err != nil {
+	if err := rules.validateSignedDockerReference(unmatchedSignature.UntrustedDockerReference); err != nil {
 		return nil, err
 	}
-	signature := unmatchedSignature.Signature // Policy OK.
-	return &signature, nil
+	// signatureAcceptanceRules have accepted this value.
+	return &Signature{
+		DockerManifestDigest: unmatchedSignature.UntrustedDockerManifestDigest,
+		DockerReference:      unmatchedSignature.UntrustedDockerReference,
+	}, nil
+}
+
+// GetUntrustedSignatureInformationWithoutVerifying extracts information available in an untrusted signature,
+// WITHOUT doing any cryptographic verification.
+// This may be useful when debugging signature verification failures,
+// or when managing a set of signatures on a single image.
+//
+// WARNING: Do not use the contents of this for ANY security decisions,
+// and be VERY CAREFUL about showing this information to humans in any way which suggest that these values “are probably” reliable.
+// There is NO REASON to expect the values to be correct, or not intentionally misleading
+// (including things like “✅ Verified by $authority”)
+func GetUntrustedSignatureInformationWithoutVerifying(untrustedSignatureBytes []byte) (*UntrustedSignatureInformation, error) {
+	// NOTE: This should eventualy do format autodetection.
+	mech, _, err := NewEphemeralGPGSigningMechanism([]byte{})
+	if err != nil {
+		return nil, err
+	}
+	defer mech.Close()
+
+	untrustedContents, shortKeyIdentifier, err := mech.UntrustedSignatureContents(untrustedSignatureBytes)
+	if err != nil {
+		return nil, err
+	}
+	var untrustedDecodedContents untrustedSignature
+	if err := json.Unmarshal(untrustedContents, &untrustedDecodedContents); err != nil {
+		return nil, InvalidSignatureError{msg: err.Error()}
+	}
+
+	var timestamp *time.Time // = nil
+	if untrustedDecodedContents.UntrustedTimestamp != nil {
+		ts := time.Unix(*untrustedDecodedContents.UntrustedTimestamp, 0)
+		timestamp = &ts
+	}
+	return &UntrustedSignatureInformation{
+		UntrustedDockerManifestDigest: untrustedDecodedContents.UntrustedDockerManifestDigest,
+		UntrustedDockerReference:      untrustedDecodedContents.UntrustedDockerReference,
+		UntrustedCreatorID:            untrustedDecodedContents.UntrustedCreatorID,
+		UntrustedTimestamp:            timestamp,
+		UntrustedShortKeyIdentifier:   shortKeyIdentifier,
+	}, nil
 }

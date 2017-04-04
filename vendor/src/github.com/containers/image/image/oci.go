@@ -2,20 +2,19 @@ package image
 
 import (
 	"encoding/json"
-	"fmt"
 	"io/ioutil"
 
 	"github.com/containers/image/manifest"
 	"github.com/containers/image/types"
-	"github.com/docker/distribution/digest"
+	"github.com/opencontainers/go-digest"
 	imgspecv1 "github.com/opencontainers/image-spec/specs-go/v1"
+	"github.com/pkg/errors"
 )
 
 type manifestOCI1 struct {
 	src               types.ImageSource // May be nil if configBlob is not nil
 	configBlob        []byte            // If set, corresponds to contents of ConfigDescriptor.
 	SchemaVersion     int               `json:"schemaVersion"`
-	MediaType         string            `json:"mediaType"`
 	ConfigDescriptor  descriptor        `json:"config"`
 	LayersDescriptors []descriptor      `json:"layers"`
 }
@@ -29,12 +28,11 @@ func manifestOCI1FromManifest(src types.ImageSource, manifest []byte) (genericMa
 }
 
 // manifestOCI1FromComponents builds a new manifestOCI1 from the supplied data:
-func manifestOCI1FromComponents(config descriptor, configBlob []byte, layers []descriptor) genericManifest {
+func manifestOCI1FromComponents(config descriptor, src types.ImageSource, configBlob []byte, layers []descriptor) genericManifest {
 	return &manifestOCI1{
-		src:               nil,
+		src:               src,
 		configBlob:        configBlob,
 		SchemaVersion:     2,
-		MediaType:         imgspecv1.MediaTypeImageManifest,
 		ConfigDescriptor:  config,
 		LayersDescriptors: layers,
 	}
@@ -45,7 +43,7 @@ func (m *manifestOCI1) serialize() ([]byte, error) {
 }
 
 func (m *manifestOCI1) manifestMIMEType() string {
-	return m.MediaType
+	return imgspecv1.MediaTypeImageManifest
 }
 
 // ConfigInfo returns a complete BlobInfo for the separate config object, or a BlobInfo{Digest:""} if there isn't a separate object.
@@ -59,7 +57,7 @@ func (m *manifestOCI1) ConfigInfo() types.BlobInfo {
 func (m *manifestOCI1) ConfigBlob() ([]byte, error) {
 	if m.configBlob == nil {
 		if m.src == nil {
-			return nil, fmt.Errorf("Internal error: neither src nor configBlob set in manifestOCI1")
+			return nil, errors.Errorf("Internal error: neither src nor configBlob set in manifestOCI1")
 		}
 		stream, _, err := m.src.GetBlob(types.BlobInfo{
 			Digest: m.ConfigDescriptor.Digest,
@@ -76,11 +74,26 @@ func (m *manifestOCI1) ConfigBlob() ([]byte, error) {
 		}
 		computedDigest := digest.FromBytes(blob)
 		if computedDigest != m.ConfigDescriptor.Digest {
-			return nil, fmt.Errorf("Download config.json digest %s does not match expected %s", computedDigest, m.ConfigDescriptor.Digest)
+			return nil, errors.Errorf("Download config.json digest %s does not match expected %s", computedDigest, m.ConfigDescriptor.Digest)
 		}
 		m.configBlob = blob
 	}
 	return m.configBlob, nil
+}
+
+// OCIConfig returns the image configuration as per OCI v1 image-spec. Information about
+// layers in the resulting configuration isn't guaranteed to be returned to due how
+// old image manifests work (docker v2s1 especially).
+func (m *manifestOCI1) OCIConfig() (*imgspecv1.Image, error) {
+	cb, err := m.ConfigBlob()
+	if err != nil {
+		return nil, err
+	}
+	configOCI := &imgspecv1.Image{}
+	if err := json.Unmarshal(cb, configOCI); err != nil {
+		return nil, err
+	}
+	return configOCI, nil
 }
 
 // LayerInfos returns a list of BlobInfos of layers referenced by this image, in order (the root layer first, and then successive layered layers).
@@ -125,7 +138,7 @@ func (m *manifestOCI1) UpdatedImage(options types.ManifestUpdateOptions) (types.
 	copy := *m // NOTE: This is not a deep copy, it still shares slices etc.
 	if options.LayerInfos != nil {
 		if len(copy.LayersDescriptors) != len(options.LayerInfos) {
-			return nil, fmt.Errorf("Error preparing updated manifest: layer count changed from %d to %d", len(copy.LayersDescriptors), len(options.LayerInfos))
+			return nil, errors.Errorf("Error preparing updated manifest: layer count changed from %d to %d", len(copy.LayersDescriptors), len(options.LayerInfos))
 		}
 		copy.LayersDescriptors = make([]descriptor, len(options.LayerInfos))
 		for i, info := range options.LayerInfos {
@@ -139,7 +152,7 @@ func (m *manifestOCI1) UpdatedImage(options types.ManifestUpdateOptions) (types.
 	case manifest.DockerV2Schema2MediaType:
 		return copy.convertToManifestSchema2()
 	default:
-		return nil, fmt.Errorf("Conversion of image manifest from %s to %s is not implemented", imgspecv1.MediaTypeImageManifest, options.ManifestMIMEType)
+		return nil, errors.Errorf("Conversion of image manifest from %s to %s is not implemented", imgspecv1.MediaTypeImageManifest, options.ManifestMIMEType)
 	}
 
 	return memoryImageFromManifest(&copy), nil

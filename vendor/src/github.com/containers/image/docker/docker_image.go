@@ -5,8 +5,10 @@ import (
 	"fmt"
 	"net/http"
 
+	"github.com/containers/image/docker/reference"
 	"github.com/containers/image/image"
 	"github.com/containers/image/types"
+	"github.com/pkg/errors"
 )
 
 // Image is a Docker-specific implementation of types.Image with a few extra methods
@@ -33,20 +35,20 @@ func newImage(ctx *types.SystemContext, ref dockerReference) (types.Image, error
 
 // SourceRefFullName returns a fully expanded name for the repository this image is in.
 func (i *Image) SourceRefFullName() string {
-	return i.src.ref.ref.FullName()
+	return i.src.ref.ref.Name()
 }
 
 // GetRepositoryTags list all tags available in the repository. Note that this has no connection with the tag(s) used for this specific image, if any.
 func (i *Image) GetRepositoryTags() ([]string, error) {
-	url := fmt.Sprintf(tagsURL, i.src.ref.ref.RemoteName())
-	res, err := i.src.c.makeRequest("GET", url, nil, nil)
+	path := fmt.Sprintf(tagsPath, reference.Path(i.src.ref.ref))
+	res, err := i.src.c.makeRequest("GET", path, nil, nil)
 	if err != nil {
 		return nil, err
 	}
 	defer res.Body.Close()
 	if res.StatusCode != http.StatusOK {
 		// print url also
-		return nil, fmt.Errorf("Invalid status code returned when fetching tags list %d", res.StatusCode)
+		return nil, errors.Errorf("Invalid status code returned when fetching tags list %d", res.StatusCode)
 	}
 	type tagsRes struct {
 		Tags []string

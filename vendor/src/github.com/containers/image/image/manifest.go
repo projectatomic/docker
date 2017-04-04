@@ -3,11 +3,10 @@ package image
 import (
 	"time"
 
-	"github.com/docker/distribution/digest"
-	"github.com/docker/engine-api/types/strslice"
-
 	"github.com/containers/image/manifest"
 	"github.com/containers/image/types"
+	"github.com/docker/engine-api/types/strslice"
+	"github.com/opencontainers/go-digest"
 	imgspecv1 "github.com/opencontainers/image-spec/specs-go/v1"
 )
 
@@ -65,6 +64,10 @@ type genericManifest interface {
 	// ConfigBlob returns the blob described by ConfigInfo, iff ConfigInfo().Digest != ""; nil otherwise.
 	// The result is cached; it is OK to call this however often you need.
 	ConfigBlob() ([]byte, error)
+	// OCIConfig returns the image configuration as per OCI v1 image-spec. Information about
+	// layers in the resulting configuration isn't guaranteed to be returned to due how
+	// old image manifests work (docker v2s1 especially).
+	OCIConfig() (*imgspecv1.Image, error)
 	// LayerInfos returns a list of BlobInfos of layers referenced by this image, in order (the root layer first, and then successive layered layers).
 	// The Digest field is guaranteed to be provided; Size may be -1.
 	// WARNING: The list may contain duplicates, and they are semantically relevant.
