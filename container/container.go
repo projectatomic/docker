@@ -43,6 +43,7 @@ import (
 	"github.com/docker/libnetwork/types"
 	agentexec "github.com/docker/swarmkit/agent/exec"
 	"github.com/opencontainers/runc/libcontainer/label"
+	specs "github.com/opencontainers/runtime-spec/specs-go"
 )
 
 const configFileName = "config.v2.json"
@@ -85,6 +86,7 @@ type CommonContainer struct {
 	HasBeenManuallyStopped bool // used for unless-stopped restart policy
 	MountPoints            map[string]*volume.MountPoint
 	HostConfig             *containertypes.HostConfig `json:"-"` // do not serialize the host config in the json, otherwise we'll make the container unportable
+	Spec                   *specs.Spec                `json:"-"` // ditto
 	ExecCommands           *exec.Store                `json:"-"`
 	SecretStore            agentexec.SecretGetter     `json:"-"`
 	SecretReferences       []*swarmtypes.SecretReference
