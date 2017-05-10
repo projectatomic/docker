@@ -7,8 +7,9 @@ import (
 	"time"
 )
 
-// Context provides enough information for a logging driver to do its function.
-type Context struct {
+// CommonContext provides almost enough information for a logging driver to do
+// its function, but not anything that's OS-specific.
+type CommonContext struct {
 	Config              map[string]string
 	ContainerID         string
 	ContainerName       string

@@ -315,7 +315,7 @@ func (container *Container) StartLogger(cfg containertypes.LogConfig) (logger.Lo
 	if err != nil {
 		return nil, fmt.Errorf("Failed to get logging factory: %v", err)
 	}
-	ctx := logger.Context{
+	cctx := logger.CommonContext{
 		Config:              cfg.Config,
 		ContainerID:         container.ID,
 		ContainerName:       container.Name,
@@ -328,6 +328,7 @@ func (container *Container) StartLogger(cfg containertypes.LogConfig) (logger.Lo
 		ContainerLabels:     container.Config.Labels,
 		DaemonName:          "docker",
 	}
+	ctx := configurePlatformLogger(cctx, container)
 
 	// Set logging file for "json-logger"
 	if cfg.Type == jsonfilelog.Name {
