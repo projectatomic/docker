@@ -23,7 +23,7 @@ read the [`dockerd`](dockerd.md) reference page.
 | [dockerd](dockerd.md) | Launch the Docker daemon                             |
 | [info](info.md) | Display system-wide information                            |
 | [inspect](inspect.md)| Return low-level information on a container or image  |
-| [version](version.md) | Show the Docker version information                  |
+| [version](version.md) | Show the jbieren Docker version information                  |
 
 
 ### Image commands

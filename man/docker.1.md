@@ -209,7 +209,7 @@ inside it)
   See **docker-unpause(1)** for full documentation on the **unpause** command.
 
 **version**
-  Show the Docker version information
+  Show the jbieren Docker version information
   See **docker-version(1)** for full documentation on the **version** command.
 
 **wait**

@@ -45,7 +45,7 @@ func NewVersionCommand(dockerCli *client.DockerCli) *cobra.Command {
 
 	cmd := &cobra.Command{
 		Use:   "version [OPTIONS]",
-		Short: "Show the Docker version information",
+		Short: "Show the jbieren Docker version information",
 		Args:  cli.NoArgs,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			return runVersion(dockerCli, &opts)
