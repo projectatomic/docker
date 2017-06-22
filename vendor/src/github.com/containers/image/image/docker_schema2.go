@@ -8,13 +8,13 @@ import (
 	"io/ioutil"
 	"strings"
 
-	"github.com/Sirupsen/logrus"
 	"github.com/containers/image/docker/reference"
 	"github.com/containers/image/manifest"
 	"github.com/containers/image/types"
 	"github.com/opencontainers/go-digest"
 	imgspecv1 "github.com/opencontainers/image-spec/specs-go/v1"
 	"github.com/pkg/errors"
+	"github.com/sirupsen/logrus"
 )
 
 // gzippedEmptyLayer is a gzip-compressed version of an empty tar file (1024 NULL bytes)
@@ -141,6 +141,24 @@ func (m *manifestSchema2) LayerInfos() []types.BlobInfo {
 	return blobs
 }
 
+// LayerDiffIDs returns a list of DiffIDs (= digests of the UNCOMPRESSED versions, whether or not the downloadable blobs are compressed) of layers referenced by this image,
+// in order (the root layer first, and then successive layered layers), if available, or nil if not.
+// WARNING: The list may contain duplicates, and they are semantically relevant.
+func (m *manifestSchema2) LayerDiffIDs() ([]digest.Digest, error) {
+	configBytes, err := m.ConfigBlob()
+	if err != nil {
+		return nil, err
+	}
+	imageConfig := &image{}
+	if err := json.Unmarshal(configBytes, imageConfig); err != nil {
+		return nil, err
+	}
+	if imageConfig.RootFS == nil {
+		return nil, errors.New("rootfs subobject missing from image config")
+	}
+	return imageConfig.RootFS.DiffIDs, nil
+}
+
 // EmbeddedDockerReferenceConflicts whether a Docker reference embedded in the manifest, if any, conflicts with destination ref.
 // It returns false if the manifest does not embed a Docker reference.
 // (This embedding unfortunately happens for Docker schema1, please do not add support for this in any new formats.)
@@ -157,13 +175,16 @@ func (m *manifestSchema2) imageInspectInfo() (*types.ImageInspectInfo, error) {
 	if err := json.Unmarshal(config, v1); err != nil {
 		return nil, err
 	}
-	return &types.ImageInspectInfo{
+	i := &types.ImageInspectInfo{
 		DockerVersion: v1.DockerVersion,
 		Created:       v1.Created,
-		Labels:        v1.Config.Labels,
 		Architecture:  v1.Architecture,
 		Os:            v1.OS,
-	}, nil
+	}
+	if v1.Config != nil {
+		i.Labels = v1.Config.Labels
+	}
+	return i, nil
 }
 
 // UpdatedImageNeedsLayerDiffIDs returns true iff UpdatedImage(options) needs InformationOnly.LayerDiffIDs.

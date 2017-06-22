@@ -73,6 +73,10 @@ type genericManifest interface {
 	// The Digest field is guaranteed to be provided; Size may be -1.
 	// WARNING: The list may contain duplicates, and they are semantically relevant.
 	LayerInfos() []types.BlobInfo
+	// LayerDiffIDs returns a list of DiffIDs (= digests of the UNCOMPRESSED versions) of layers referenced by this image,
+	// in order (the root layer first, and then successive layered layers), if available, or nil if not.
+	// WARNING: The list may contain duplicates, and they are semantically relevant.
+	LayerDiffIDs() ([]digest.Digest, error)
 	// EmbeddedDockerReferenceConflicts whether a Docker reference embedded in the manifest, if any, conflicts with destination ref.
 	// It returns false if the manifest does not embed a Docker reference.
 	// (This embedding unfortunately happens for Docker schema1, please do not add support for this in any new formats.)
@@ -87,7 +91,9 @@ type genericManifest interface {
 	UpdatedImage(options types.ManifestUpdateOptions) (types.Image, error)
 }
 
-func manifestInstanceFromBlob(src types.ImageSource, manblob []byte, mt string) (genericManifest, error) {
+// manifestInstanceFromBlob returns a genericManifest implementation for (manblob, mt) in src.
+// If manblob is a manifest list, it implicitly chooses an appropriate image from the list.
+func manifestInstanceFromBlob(ctx *types.SystemContext, src types.ImageSource, manblob []byte, mt string) (genericManifest, error) {
 	switch mt {
 	// "application/json" is a valid v2s1 value per https://github.com/docker/distribution/blob/master/docs/spec/manifest-v2-1.md .
 	// This works for now, when nothing else seems to return "application/json"; if that were not true, the mapping/detection might
@@ -99,7 +105,7 @@ func manifestInstanceFromBlob(src types.ImageSource, manblob []byte, mt string) 
 	case manifest.DockerV2Schema2MediaType:
 		return manifestSchema2FromManifest(src, manblob)
 	case manifest.DockerV2ListMediaType:
-		return manifestSchema2FromManifestList(src, manblob)
+		return manifestSchema2FromManifestList(ctx, src, manblob)
 	default:
 		// If it's not a recognized manifest media type, or we have failed determining the type, we'll try one last time
 		// to deserialize using v2s1 as per https://github.com/docker/distribution/blob/master/manifests.go#L108

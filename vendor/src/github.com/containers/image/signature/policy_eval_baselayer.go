@@ -3,12 +3,16 @@
 package signature
 
 import (
-	"github.com/Sirupsen/logrus"
 	"github.com/containers/image/types"
+	"github.com/sirupsen/logrus"
 )
 
 func (pr *prSignedBaseLayer) isSignatureAuthorAccepted(image types.UnparsedImage, sig []byte) (signatureAcceptanceResult, *Signature, error) {
 	return sarUnknown, nil, nil
+}
+
+func (pr *prSignedBaseLayer) isImageAuthenticated(image types.UnparsedImage) (bool, error) {
+	return false, nil
 }
 
 func (pr *prSignedBaseLayer) isRunningImageAllowed(image types.UnparsedImage) (bool, error) {

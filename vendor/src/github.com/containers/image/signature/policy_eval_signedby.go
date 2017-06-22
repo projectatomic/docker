@@ -3,6 +3,7 @@
 package signature
 
 import (
+	"context"
 	"fmt"
 	"io/ioutil"
 	"strings"
@@ -89,8 +90,9 @@ func (pr *prSignedBy) isSignatureAuthorAccepted(image types.UnparsedImage, sig [
 	return sarAccepted, signature, nil
 }
 
-func (pr *prSignedBy) isRunningImageAllowed(image types.UnparsedImage) (bool, error) {
-	sigs, err := image.Signatures()
+func (pr *prSignedBy) isImageAuthenticated(image types.UnparsedImage) (bool, error) {
+	// FIXME: pass context.Context
+	sigs, err := image.Signatures(context.TODO())
 	if err != nil {
 		return false, err
 	}
@@ -126,4 +128,8 @@ func (pr *prSignedBy) isRunningImageAllowed(image types.UnparsedImage) (bool, er
 			strings.Join(msgs, "; ")))
 	}
 	return false, summary
+}
+
+func (pr *prSignedBy) isRunningImageAllowed(image types.UnparsedImage) (bool, error) {
+	return pr.isImageAuthenticated(image)
 }
