@@ -7,6 +7,7 @@ import (
 	"path/filepath"
 
 	"github.com/containers/image/docker"
+	"github.com/containers/image/docker/daemon/signatures"
 	containersImageRef "github.com/containers/image/docker/reference"
 	"github.com/containers/image/manifest"
 	"github.com/containers/image/signature"
@@ -43,8 +44,8 @@ func configurePolicyContext() (*signature.PolicyContext, error) {
 	return pc, nil
 }
 
-func (p *v2Puller) checkTrusted(c gctx.Context, ref reference.Named) (reference.Named, error) {
-	p.originalRef = ref
+// ciImage returns a containers/image/types.Image for ref.
+func (p *v2Puller) ciImage(c gctx.Context, ref reference.Named) (types.Image, error) {
 	// we can't use upstream docker/docker/reference since in projectatomic/docker
 	// we modified docker/docker/reference and it's not doing any normalization.
 	// we instead forked docker/docker/reference in containers/image and we need
@@ -76,7 +77,12 @@ func (p *v2Puller) checkTrusted(c gctx.Context, ref reference.Named) (reference.
 	if err != nil {
 		return nil, err
 	}
-	allowed, err := p.policyContext.IsRunningImageAllowed(img)
+	return img, nil
+}
+
+func (p *v2Puller) checkTrusted(ref reference.Named, ciImage types.Image) (reference.Named, error) {
+	p.originalRef = ref
+	allowed, err := p.policyContext.IsRunningImageAllowed(ciImage)
 	if !allowed {
 		if err != nil {
 			return nil, fmt.Errorf("%s isn't allowed: %v", ref.String(), err)
@@ -86,7 +92,7 @@ func (p *v2Puller) checkTrusted(c gctx.Context, ref reference.Named) (reference.
 	if err != nil {
 		return nil, err
 	}
-	mfst, _, err := img.Manifest()
+	mfst, _, err := ciImage.Manifest()
 	if err != nil {
 		return nil, err
 	}
@@ -99,4 +105,10 @@ func (p *v2Puller) checkTrusted(c gctx.Context, ref reference.Named) (reference.
 		return nil, err
 	}
 	return ref, nil
+}
+
+// storeSignature stores the signatures of ciImage and updates the tag in ciImage.Reference() if necessary.
+func (p *v2Puller) storeSignatures(c gctx.Context, ciImage types.Image) error {
+	store := signatures.NewStore(nil)
+	return store.RecordImage(c, ciImage)
 }

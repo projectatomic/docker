@@ -9,6 +9,7 @@ import (
 	"os"
 
 	"github.com/containers/image/signature"
+	"github.com/containers/image/types"
 	"github.com/docker/distribution"
 	"github.com/docker/distribution/context"
 	"github.com/docker/distribution/manifest/schema1"
@@ -75,6 +76,14 @@ func configurePolicyContext() (*signature.PolicyContext, error) {
 	return nil, nil
 }
 
-func (p *v2Puller) checkTrusted(c gctx.Context, ref reference.Named) (reference.Named, error) {
+func (p *v2Puller) ciImage(c gctx.Context, ref reference.Named) (types.Image, error) {
+	return nil, nil
+}
+
+func (p *v2Puller) checkTrusted(ref reference.Named, ciImage types.Image) (reference.Named, error) {
 	return ref, nil
+}
+
+func (p *v2Puller) storeSignatures(c gctx.Context, ciImage types.Image) error {
+	return nil
 }
