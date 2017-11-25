@@ -13,6 +13,7 @@ import (
 	"os"
 	"path/filepath"
 
+	"github.com/Sirupsen/logrus"
 	"github.com/containers/image/docker/reference"
 	"github.com/containers/image/manifest"
 	"github.com/containers/image/types"
@@ -22,7 +23,6 @@ import (
 	"github.com/opencontainers/go-digest"
 	imgspecv1 "github.com/opencontainers/image-spec/specs-go/v1"
 	"github.com/pkg/errors"
-	"github.com/sirupsen/logrus"
 )
 
 type dockerImageDestination struct {

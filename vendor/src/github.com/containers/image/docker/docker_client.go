@@ -12,6 +12,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/Sirupsen/logrus"
 	"github.com/containers/image/docker/reference"
 	"github.com/containers/image/pkg/docker/config"
 	"github.com/containers/image/pkg/tlsclientconfig"
@@ -20,7 +21,6 @@ import (
 	"github.com/docker/go-connections/tlsconfig"
 	"github.com/opencontainers/go-digest"
 	"github.com/pkg/errors"
-	"github.com/sirupsen/logrus"
 )
 
 const (
