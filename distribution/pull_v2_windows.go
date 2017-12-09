@@ -5,9 +5,11 @@ package distribution
 import (
 	"encoding/json"
 	"fmt"
+	"io"
 	"net/http"
 	"os"
 
+	ciImage "github.com/containers/image/image"
 	"github.com/containers/image/signature"
 	"github.com/containers/image/types"
 	"github.com/docker/distribution"
@@ -76,14 +78,14 @@ func configurePolicyContext() (*signature.PolicyContext, error) {
 	return nil, nil
 }
 
-func (p *v2Puller) ciImage(c gctx.Context, ref reference.Named) (types.Image, error) {
-	return nil, nil
+func (p *v2Puller) ciImage(c gctx.Context, ref reference.Named) (*ciImage.UnparsedImage, io.Closer, error) {
+	return nil, nil, nil
 }
 
-func (p *v2Puller) checkTrusted(ref reference.Named, ciImage types.Image) (reference.Named, error) {
+func (p *v2Puller) checkTrusted(ref reference.Named, unparsed types.UnparsedImage) (reference.Named, error) {
 	return ref, nil
 }
 
-func (p *v2Puller) storeSignatures(c gctx.Context, ciImage types.Image) error {
+func (p *v2Puller) storeSignatures(c gctx.Context, unparsed *ciImage.UnparsedImage) error {
 	return nil
 }

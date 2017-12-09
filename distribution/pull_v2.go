@@ -13,8 +13,8 @@ import (
 
 	"github.com/Sirupsen/logrus"
 	cimagedocker "github.com/containers/image/docker"
+	ciImage "github.com/containers/image/image"
 	"github.com/containers/image/signature"
-	"github.com/containers/image/types"
 	"github.com/docker/distribution"
 	"github.com/docker/distribution/digest"
 	"github.com/docker/distribution/manifest/manifestlist"
@@ -100,10 +100,11 @@ func (p *v2Puller) pullV2Repository(ctx context.Context, ref reference.Named) (e
 	var layersDownloaded bool
 	if !reference.IsNameOnly(ref) {
 		var err error
-		ciImage, err := p.ciImage(ctx, ref)
+		ciImage, closer, err := p.ciImage(ctx, ref)
 		if err != nil {
 			return err
 		}
+		defer closer.Close()
 		if p.config.SignatureCheck {
 			ref, err = p.checkTrusted(ref, ciImage)
 			if err != nil {
@@ -140,10 +141,11 @@ func (p *v2Puller) pullV2Repository(ctx context.Context, ref reference.Named) (e
 			}
 			var ref reference.Named
 			ref = tagRef
-			ciImage, err := p.ciImage(ctx, ref)
+			ciImage, closer, err := p.ciImage(ctx, ref)
 			if err != nil {
 				return err
 			}
+			defer closer.Close()
 			if p.config.SignatureCheck {
 				trustedRef, err := p.checkTrusted(tagRef, ciImage)
 				if err != nil {
@@ -375,7 +377,7 @@ func (ld *v2LayerDescriptor) Registered(diffID layer.DiffID) {
 	ld.V2MetadataService.Add(diffID, metadata.V2Metadata{Digest: ld.digest, SourceRepository: ld.repoInfo.FullName()})
 }
 
-func (p *v2Puller) pullV2Tag(ctx context.Context, ref reference.Named, ciImage types.Image) (tagUpdated bool, err error) {
+func (p *v2Puller) pullV2Tag(ctx context.Context, ref reference.Named, ciImage *ciImage.UnparsedImage) (tagUpdated bool, err error) {
 	manSvc, err := p.repo.Manifests(ctx)
 	if err != nil {
 		return false, err

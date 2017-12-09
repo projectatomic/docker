@@ -4,11 +4,13 @@ package distribution
 
 import (
 	"fmt"
+	"io"
 	"path/filepath"
 
 	"github.com/containers/image/docker"
 	"github.com/containers/image/docker/daemon/signatures"
 	containersImageRef "github.com/containers/image/docker/reference"
+	ciImage "github.com/containers/image/image"
 	"github.com/containers/image/manifest"
 	"github.com/containers/image/signature"
 	"github.com/containers/image/types"
@@ -44,19 +46,19 @@ func configurePolicyContext() (*signature.PolicyContext, error) {
 	return pc, nil
 }
 
-// ciImage returns a containers/image/types.Image for ref.
-func (p *v2Puller) ciImage(c gctx.Context, ref reference.Named) (types.Image, error) {
+// ciImage returns a *containers/image/image.UnparsedImage and a close callback for ref.
+func (p *v2Puller) ciImage(c gctx.Context, ref reference.Named) (*ciImage.UnparsedImage, io.Closer, error) {
 	// we can't use upstream docker/docker/reference since in projectatomic/docker
 	// we modified docker/docker/reference and it's not doing any normalization.
 	// we instead forked docker/docker/reference in containers/image and we need
 	// this parsing here to make sure signature naming checks are consistent.
 	dockerRef, err := containersImageRef.ParseNormalizedNamed(ref.String())
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 	imgRef, err := docker.NewReference(dockerRef)
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 	isSecure := (p.endpoint.TLSConfig == nil || !p.endpoint.TLSConfig.InsecureSkipVerify)
 	authConfig := registry.ResolveAuthConfig(p.config.AuthConfigs, p.repoInfo.Index)
@@ -73,16 +75,17 @@ func (p *v2Puller) ciImage(c gctx.Context, ref reference.Named) (types.Image, er
 	if p.config.RegistryService.SecureIndex(p.repoInfo.Index.Name) {
 		ctx.DockerCertPath = filepath.Join(registry.CertsDir, p.repoInfo.Index.Name)
 	}
-	img, err := imgRef.NewImage(ctx)
+	src, err := imgRef.NewImageSource(ctx)
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
-	return img, nil
+	unparsed := ciImage.UnparsedInstance(src, nil)
+	return unparsed, src, nil
 }
 
-func (p *v2Puller) checkTrusted(ref reference.Named, ciImage types.Image) (reference.Named, error) {
+func (p *v2Puller) checkTrusted(ref reference.Named, unparsed types.UnparsedImage) (reference.Named, error) {
 	p.originalRef = ref
-	allowed, err := p.policyContext.IsRunningImageAllowed(ciImage)
+	allowed, err := p.policyContext.IsRunningImageAllowed(unparsed)
 	if !allowed {
 		if err != nil {
 			return nil, fmt.Errorf("%s isn't allowed: %v", ref.String(), err)
@@ -92,7 +95,7 @@ func (p *v2Puller) checkTrusted(ref reference.Named, ciImage types.Image) (refer
 	if err != nil {
 		return nil, err
 	}
-	mfst, _, err := ciImage.Manifest()
+	mfst, _, err := unparsed.Manifest()
 	if err != nil {
 		return nil, err
 	}
@@ -108,7 +111,11 @@ func (p *v2Puller) checkTrusted(ref reference.Named, ciImage types.Image) (refer
 }
 
 // storeSignature stores the signatures of ciImage and updates the tag in ciImage.Reference() if necessary.
-func (p *v2Puller) storeSignatures(c gctx.Context, ciImage types.Image) error {
+func (p *v2Puller) storeSignatures(c gctx.Context, unparsed *ciImage.UnparsedImage) error {
+	img, err := ciImage.FromUnparsedImage(nil, unparsed)
+	if err != nil {
+		return err
+	}
 	store := signatures.NewStore(nil)
-	return store.RecordImage(c, ciImage)
+	return store.RecordImage(c, img)
 }
