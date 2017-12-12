@@ -362,7 +362,7 @@ func (a *Driver) Put(id string) error {
 
 // Diff produces an archive of the changes between the specified
 // layer and its parent layer which may be "".
-func (a *Driver) Diff(id, parent string) (archive.Archive, error) {
+func (a *Driver) Diff(id, parent, mountlabel string) (archive.Archive, error) {
 	// AUFS doesn't need the parent layer to produce a diff.
 	return archive.TarWithOptions(path.Join(a.rootPath(), "diff", id), &archive.TarOptions{
 		Compression:     archive.Uncompressed,
@@ -397,7 +397,7 @@ func (a *Driver) applyDiff(id string, diff archive.Reader) error {
 // DiffSize calculates the changes between the specified id
 // and its parent and returns the size in bytes of the changes
 // relative to its base filesystem directory.
-func (a *Driver) DiffSize(id, parent string) (size int64, err error) {
+func (a *Driver) DiffSize(id, parent, mountlabel string) (size int64, err error) {
 	// AUFS doesn't need the parent layer to calculate the diff size.
 	return directory.Size(path.Join(a.rootPath(), "diff", id))
 }
@@ -405,18 +405,18 @@ func (a *Driver) DiffSize(id, parent string) (size int64, err error) {
 // ApplyDiff extracts the changeset from the given diff into the
 // layer with the specified id and parent, returning the size of the
 // new layer in bytes.
-func (a *Driver) ApplyDiff(id, parent string, diff archive.Reader) (size int64, err error) {
+func (a *Driver) ApplyDiff(id, parent, mountlabel string, diff archive.Reader) (size int64, err error) {
 	// AUFS doesn't need the parent id to apply the diff.
 	if err = a.applyDiff(id, diff); err != nil {
 		return
 	}
 
-	return a.DiffSize(id, parent)
+	return a.DiffSize(id, parent, mountlabel)
 }
 
 // Changes produces a list of changes between the specified layer
 // and its parent layer. If parent is "", then all changes will be ADD changes.
-func (a *Driver) Changes(id, parent string) ([]archive.Change, error) {
+func (a *Driver) Changes(id, parent, mountlabel string) ([]archive.Change, error) {
 	// AUFS doesn't have snapshots, so we need to get changes from all parent
 	// layers.
 	layers, err := a.getParentLayerPaths(id)

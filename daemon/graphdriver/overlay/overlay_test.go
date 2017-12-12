@@ -47,7 +47,7 @@ func TestOverlayDiffApply10Files(t *testing.T) {
 
 func TestOverlayChanges(t *testing.T) {
 	t.Skipf("Fails to compute changes intermittently")
-	graphtest.DriverTestChanges(t, "overlay")
+	graphtest.DriverTestChanges(t, "overlay", "")
 }
 
 func TestOverlayTeardown(t *testing.T) {

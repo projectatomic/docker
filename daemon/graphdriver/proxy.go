@@ -170,10 +170,11 @@ func (d *graphDriverProxy) Cleanup() error {
 	return nil
 }
 
-func (d *graphDriverProxy) Diff(id, parent string) (archive.Archive, error) {
+func (d *graphDriverProxy) Diff(id, parent, mountlabel string) (archive.Archive, error) {
 	args := &graphDriverRequest{
-		ID:     id,
-		Parent: parent,
+		ID:         id,
+		Parent:     parent,
+		MountLabel: mountlabel,
 	}
 	body, err := d.client.Stream("GraphDriver.Diff", args)
 	if err != nil {
@@ -182,10 +183,11 @@ func (d *graphDriverProxy) Diff(id, parent string) (archive.Archive, error) {
 	return archive.Archive(body), nil
 }
 
-func (d *graphDriverProxy) Changes(id, parent string) ([]archive.Change, error) {
+func (d *graphDriverProxy) Changes(id, parent, mountlabel string) ([]archive.Change, error) {
 	args := &graphDriverRequest{
-		ID:     id,
-		Parent: parent,
+		ID:         id,
+		Parent:     parent,
+		MountLabel: mountlabel,
 	}
 	var ret graphDriverResponse
 	if err := d.client.Call("GraphDriver.Changes", args, &ret); err != nil {
@@ -198,7 +200,7 @@ func (d *graphDriverProxy) Changes(id, parent string) ([]archive.Change, error) 
 	return ret.Changes, nil
 }
 
-func (d *graphDriverProxy) ApplyDiff(id, parent string, diff archive.Reader) (int64, error) {
+func (d *graphDriverProxy) ApplyDiff(id, parent, mountlabel, diff archive.Reader) (int64, error) {
 	var ret graphDriverResponse
 	if err := d.client.SendFile(fmt.Sprintf("GraphDriver.ApplyDiff?id=%s&parent=%s", id, parent), diff, &ret); err != nil {
 		return -1, err
@@ -209,10 +211,11 @@ func (d *graphDriverProxy) ApplyDiff(id, parent string, diff archive.Reader) (in
 	return ret.Size, nil
 }
 
-func (d *graphDriverProxy) DiffSize(id, parent string) (int64, error) {
+func (d *graphDriverProxy) DiffSize(id, parent, mountlabel string) (int64, error) {
 	args := &graphDriverRequest{
-		ID:     id,
-		Parent: parent,
+		ID:         id,
+		Parent:     parent,
+		MountLabel: mountlabel,
 	}
 	var ret graphDriverResponse
 	if err := d.client.Call("GraphDriver.DiffSize", args, &ret); err != nil {
