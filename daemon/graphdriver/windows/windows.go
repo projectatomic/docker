@@ -164,21 +164,18 @@ func (d *Driver) Exists(id string) bool {
 // CreateReadWrite creates a layer that is writable for use as a container
 // file system.
 func (d *Driver) CreateReadWrite(id, parent string, opts *graphdriver.CreateOpts) error {
-	if opts != nil {
-		return d.create(id, parent, opts.MountLabel, false, opts.StorageOpt)
-	}
-	return d.create(id, parent, "", false, nil)
+	return d.create(id, parent, false, opt)
 }
 
 // Create creates a new read-only layer with the given id.
 func (d *Driver) Create(id, parent string, opts *graphdriver.CreateOpts) error {
 	if opts != nil {
-		return d.create(id, parent, opts.MountLabel, true, opts.StorageOpt)
+		return d.create(id, parent, true, opts.StorageOpt)
 	}
-	return d.create(id, parent, "", true, nil)
+	return d.create(id, parent, true, nil)
 }
 
-func (d *Driver) create(id, parent, mountLabel string, readOnly bool, storageOpt map[string]string) error {
+func (d *Driver) create(id, parent, readOnly bool, storageOpt map[string]string) error {
 	rPId, err := d.resolveID(parent)
 	if err != nil {
 		return err
@@ -527,13 +524,13 @@ func (d *Driver) ApplyDiff(id, parent string, diff io.Reader) (int64, error) {
 // DiffSize calculates the changes between the specified layer
 // and its parent and returns the size in bytes of the changes
 // relative to its base filesystem directory.
-func (d *Driver) DiffSize(id, parent string) (size int64, err error) {
+func (d *Driver) DiffSize(id, parent, mountLabel string) (size int64, err error) {
 	rPId, err := d.resolveID(parent)
 	if err != nil {
 		return
 	}
 
-	changes, err := d.Changes(id, rPId)
+	changes, err := d.Changes(id, rPId, mountLabel)
 	if err != nil {
 		return
 	}

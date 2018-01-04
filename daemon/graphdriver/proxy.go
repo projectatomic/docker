@@ -19,7 +19,6 @@ type graphDriverProxy struct {
 type graphDriverRequest struct {
 	ID         string            `json:",omitempty"`
 	Parent     string            `json:",omitempty"`
-	MountLabel string            `json:",omitempty"`
 	StorageOpt map[string]string `json:",omitempty"`
 }
 
@@ -73,7 +72,6 @@ func (d *graphDriverProxy) CreateReadWrite(id, parent string, opts *CreateOpts) 
 		Parent: parent,
 	}
 	if opts != nil {
-		args.MountLabel = opts.MountLabel
 		args.StorageOpt = opts.StorageOpt
 	}
 
@@ -93,7 +91,6 @@ func (d *graphDriverProxy) Create(id, parent string, opts *CreateOpts) error {
 		Parent: parent,
 	}
 	if opts != nil {
-		args.MountLabel = opts.MountLabel
 		args.StorageOpt = opts.StorageOpt
 	}
 	var ret graphDriverResponse
@@ -120,8 +117,7 @@ func (d *graphDriverProxy) Remove(id string) error {
 
 func (d *graphDriverProxy) Get(id, mountLabel string) (string, error) {
 	args := &graphDriverRequest{
-		ID:         id,
-		MountLabel: mountLabel,
+		ID: id,
 	}
 	var ret graphDriverResponse
 	if err := d.p.Client().Call("GraphDriver.Get", args, &ret); err != nil {
@@ -197,7 +193,7 @@ func (d *graphDriverProxy) Cleanup() error {
 	return nil
 }
 
-func (d *graphDriverProxy) Diff(id, parent string) (io.ReadCloser, error) {
+func (d *graphDriverProxy) Diff(id, parent, mountLabel string) (io.ReadCloser, error) {
 	args := &graphDriverRequest{
 		ID:     id,
 		Parent: parent,
@@ -209,7 +205,7 @@ func (d *graphDriverProxy) Diff(id, parent string) (io.ReadCloser, error) {
 	return body, nil
 }
 
-func (d *graphDriverProxy) Changes(id, parent string) ([]archive.Change, error) {
+func (d *graphDriverProxy) Changes(id, parent, mountLabel string) ([]archive.Change, error) {
 	args := &graphDriverRequest{
 		ID:     id,
 		Parent: parent,
@@ -225,7 +221,7 @@ func (d *graphDriverProxy) Changes(id, parent string) ([]archive.Change, error) 
 	return ret.Changes, nil
 }
 
-func (d *graphDriverProxy) ApplyDiff(id, parent string, diff io.Reader) (int64, error) {
+func (d *graphDriverProxy) ApplyDiff(id, parent, mountLabel string, diff io.Reader) (int64, error) {
 	var ret graphDriverResponse
 	if err := d.p.Client().SendFile(fmt.Sprintf("GraphDriver.ApplyDiff?id=%s&parent=%s", id, parent), diff, &ret); err != nil {
 		return -1, err
@@ -236,7 +232,7 @@ func (d *graphDriverProxy) ApplyDiff(id, parent string, diff io.Reader) (int64, 
 	return ret.Size, nil
 }
 
-func (d *graphDriverProxy) DiffSize(id, parent string) (int64, error) {
+func (d *graphDriverProxy) DiffSize(id, parent, mountLabel string) (int64, error) {
 	args := &graphDriverRequest{
 		ID:     id,
 		Parent: parent,

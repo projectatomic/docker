@@ -55,10 +55,10 @@ func NaiveDiffDriverWithApply(driver ApplyDiffProtoDriver, uidMaps, gidMaps []id
 }
 
 // ApplyDiff creates a diff layer with either the NaiveDiffDriver or with a fallback.
-func (d *naiveDiffDriverWithApply) ApplyDiff(id, parent string, diff io.Reader) (int64, error) {
+func (d *naiveDiffDriverWithApply) ApplyDiff(id, parent, mountLabel string, diff io.Reader) (int64, error) {
 	b, err := d.applyDiff.ApplyDiff(id, parent, diff)
 	if err == ErrApplyDiffFallback {
-		return d.Driver.ApplyDiff(id, parent, diff)
+		return d.Driver.ApplyDiff(id, parent, mountLabel, diff)
 	}
 	return b, err
 }

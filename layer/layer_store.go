@@ -32,8 +32,9 @@ type layerStore struct {
 	layerMap map[ChainID]*roLayer
 	layerL   sync.Mutex
 
-	mounts map[string]*mountedLayer
-	mountL sync.Mutex
+	mounts     map[string]*mountedLayer
+	mountL     sync.Mutex
+	mountLabel string
 }
 
 // StoreOptions are the options used to create a new Store instance
@@ -203,7 +204,7 @@ func (ls *layerStore) loadMount(mount string) error {
 	return nil
 }
 
-func (ls *layerStore) applyTar(tx MetadataTransaction, ts io.Reader, parent string, layer *roLayer) error {
+func (ls *layerStore) applyTar(tx MetadataTransaction, ts io.Reader, parent, mountLabel string, layer *roLayer) error {
 	digester := digest.Canonical.New()
 	tr := io.TeeReader(ts, digester.Hash())
 
@@ -221,7 +222,7 @@ func (ls *layerStore) applyTar(tx MetadataTransaction, ts io.Reader, parent stri
 		return err
 	}
 
-	applySize, err := ls.driver.ApplyDiff(layer.cacheID, parent, rdr)
+	applySize, err := ls.driver.ApplyDiff(layer.cacheID, parent, mountLabel, rdr)
 	if err != nil {
 		return err
 	}
@@ -238,10 +239,10 @@ func (ls *layerStore) applyTar(tx MetadataTransaction, ts io.Reader, parent stri
 }
 
 func (ls *layerStore) Register(ts io.Reader, parent ChainID) (Layer, error) {
-	return ls.registerWithDescriptor(ts, parent, distribution.Descriptor{})
+	return ls.registerWithDescriptor(ts, parent, ls.mountLabel, distribution.Descriptor{})
 }
 
-func (ls *layerStore) registerWithDescriptor(ts io.Reader, parent ChainID, descriptor distribution.Descriptor) (Layer, error) {
+func (ls *layerStore) registerWithDescriptor(ts io.Reader, parent ChainID, mountLabel string, descriptor distribution.Descriptor) (Layer, error) {
 	// err is used to hold the error which will always trigger
 	// cleanup of creates sources but may not be an error returned
 	// to the caller (already exists).
@@ -299,7 +300,7 @@ func (ls *layerStore) registerWithDescriptor(ts io.Reader, parent ChainID, descr
 		}
 	}()
 
-	if err = ls.applyTar(tx, ts, pid, layer); err != nil {
+	if err = ls.applyTar(tx, ts, pid, mountLabel, layer); err != nil {
 		return nil, err
 	}
 
@@ -478,6 +479,7 @@ func (ls *layerStore) CreateRWLayer(name string, parent ChainID, mountLabel stri
 		parent:     p,
 		mountID:    ls.mountID(name),
 		layerStore: ls,
+		mountLabel: mountLabel,
 		references: map[RWLayer]*referencedRWLayer{},
 	}
 
@@ -491,6 +493,7 @@ func (ls *layerStore) CreateRWLayer(name string, parent ChainID, mountLabel stri
 
 	createOpts := &graphdriver.CreateOpts{
 		StorageOpt: storageOpt,
+		MountLabel: mountLabel,
 	}
 
 	if err = ls.driver.CreateReadWrite(m.mountID, pid, createOpts); err != nil {

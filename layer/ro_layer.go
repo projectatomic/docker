@@ -12,6 +12,7 @@ type roLayer struct {
 	chainID    ChainID
 	diffID     DiffID
 	parent     *roLayer
+	mountLabel string
 	cacheID    string
 	size       int64
 	layerStore *layerStore
@@ -60,7 +61,7 @@ func (rl *roLayer) TarStreamFrom(parent ChainID) (io.ReadCloser, error) {
 	if parent != ChainID("") && parentCacheID == "" {
 		return nil, fmt.Errorf("layer ID '%s' is not a parent of the specified layer: cannot provide diff to non-parent", parent)
 	}
-	return rl.layerStore.driver.Diff(rl.cacheID, parentCacheID)
+	return rl.layerStore.driver.Diff(rl.cacheID, parentCacheID, rl.mountLabel)
 }
 
 func (rl *roLayer) ChainID() ChainID {
