@@ -57,8 +57,9 @@ var flatOptions = map[string]bool{
 // It includes json tags to deserialize configuration from a file
 // using the same names that the flags in the command line use.
 type LogConfig struct {
-	Type   string            `json:"log-driver,omitempty"`
-	Config map[string]string `json:"log-opts,omitempty"`
+	Type    string            `json:"log-driver,omitempty"`
+	Config  map[string]string `json:"log-opts,omitempty"`
+	MaxLine int               `json:"log-max-line,omitempty"`
 }
 
 // commonBridgeConfig stores all the platform-common bridge driver specific
@@ -184,6 +185,7 @@ func (config *Config) InstallCommonFlags(flags *pflag.FlagSet) {
 	flags.Var(opts.NewListOptsRef(&config.DNSSearch, opts.ValidateDNSSearch), "dns-search", "DNS search domains to use")
 	flags.Var(opts.NewNamedListOptsRef("labels", &config.Labels, opts.ValidateLabel), "label", "Set key=value labels to the daemon")
 	flags.StringVar(&config.LogConfig.Type, "log-driver", "json-file", "Default driver for container logs")
+	flags.IntVar(&config.LogConfig.MaxLine, "log-max-line", 0, "Maximum length of a log line to read")
 	flags.Var(opts.NewNamedMapOpts("log-opts", config.LogConfig.Config, nil), "log-opt", "Default log driver options for containers")
 	flags.StringVar(&config.ClusterAdvertise, "cluster-advertise", "", "Address or interface name to advertise")
 	flags.StringVar(&config.ClusterStore, "cluster-store", "", "URL of the distributed storage backend")

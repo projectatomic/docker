@@ -75,6 +75,7 @@ type CommonContainer struct {
 	ImageID         image.ID `json:"Image"`
 	NetworkSettings *network.Settings
 	LogPath         string
+	LogMaxLine      int
 	Name            string
 	Driver          string
 	// MountLabel contains the options for the 'mount' command
@@ -862,7 +863,7 @@ func (container *Container) startLogging() error {
 		return fmt.Errorf("Failed to initialize logging driver: %v", err)
 	}
 
-	copier := logger.NewCopier(map[string]io.Reader{"stdout": container.StdoutPipe(), "stderr": container.StderrPipe()}, l)
+	copier := logger.NewCopier(map[string]io.Reader{"stdout": container.StdoutPipe(), "stderr": container.StderrPipe()}, l, container.LogMaxLine)
 	container.LogCopier = copier
 	copier.Run()
 	container.LogDriver = l

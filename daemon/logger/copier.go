@@ -23,14 +23,19 @@ type Copier struct {
 	copyJobs  sync.WaitGroup
 	closeOnce sync.Once
 	closed    chan struct{}
+	maxLine   int
 }
 
 // NewCopier creates a new Copier
-func NewCopier(srcs map[string]io.Reader, dst Logger) *Copier {
+func NewCopier(srcs map[string]io.Reader, dst Logger, maxLine int) *Copier {
+	if maxLine == 0 {
+		maxLine = bufSize
+	}
 	return &Copier{
-		srcs:   srcs,
-		dst:    dst,
-		closed: make(chan struct{}),
+		maxLine: maxLine,
+		srcs:    srcs,
+		dst:     dst,
+		closed:  make(chan struct{}),
 	}
 }
 
@@ -44,7 +49,7 @@ func (c *Copier) Run() {
 
 func (c *Copier) copySrc(name string, src io.Reader) {
 	defer c.copyJobs.Done()
-	buf := make([]byte, bufSize)
+	buf := make([]byte, c.maxLine)
 	n := 0
 	eof := false
 	msg := &Message{Source: name}

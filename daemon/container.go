@@ -131,6 +131,7 @@ func (daemon *Daemon) newContainer(name string, config *containertypes.Config, h
 	base.Path = entrypoint
 	base.Args = args //FIXME: de-duplicate from config
 	base.Config = config
+	base.LogMaxLine = daemon.configStore.LogConfig.MaxLine
 	base.HostConfig = &containertypes.HostConfig{}
 	base.ImageID = imgID
 	base.NetworkSettings = &network.Settings{IsAnonymousEndpoint: noExplicitName}
