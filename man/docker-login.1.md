@@ -9,14 +9,11 @@ docker-login - Log in to a Docker registry.
 [**--help**]
 [**-p**|**--password**[=*PASSWORD*]]
 [**-u**|**--username**[=*USERNAME*]]
-[SERVER]
+SERVER
 
 # DESCRIPTION
-Log in to a Docker Registry located on the specified
-`SERVER`.  You can specify a URL or a `hostname` for the `SERVER` value. If you
-do not specify a `SERVER`, the command uses the first value in the field 'registries'
-in the '[registries.search]' table in /etc/containers/registries.conf, and if
-not specified there, Docker's public registry located at `https://registry-1.docker.io/`.
+Log in to a Docker Registry located on the specified `SERVER`.
+You must specify a URL or a `hostname` for the `SERVER` value.
 
 To get a username/password for Docker's public registry, create an account on Docker Hub.
 
@@ -45,7 +42,7 @@ credentials.  When you log in, the command stores encoded credentials in
 
     # docker login localhost:8080
 
-## Login to Docker Hub overriding /etc/containers/registries.conf
+## Login to Docker Hub
 
     # docker login docker.io
 
@@ -59,3 +56,4 @@ June 2014, updated by Sven Dowideit <SvenDowideit@home.org.au>
 April 2015, updated by Mary Anthony for v2 <mary@docker.com>
 November 2015, updated by Sally O'Malley <somalley@redhat.com>
 March 2018, updated by Tom Sweeney <tsweeney@redhat.com>
+September 2018, updated by Tom Sweeney <tsweeney@redhat.com>

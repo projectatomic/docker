@@ -16,10 +16,9 @@ keywords: "registry, login, image"
 # login
 
 ```markdown
-Usage:  docker login [OPTIONS] [SERVER]
+Usage:  docker login [OPTIONS] SERVER
 
 Log in to a Docker registry.
-If no server is specified, the default is defined by the daemon.
 
 Options:
       --help              Print usage
@@ -28,7 +27,7 @@ Options:
 ```
 
 If you want to login to a self-hosted registry you can specify this by
-adding the server name.
+using the server name.
 
     example:
     $ docker login localhost:8080
