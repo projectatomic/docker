@@ -9,7 +9,7 @@ docker-login - Log in to a Docker registry.
 [**--help**]
 [**-p**|**--password**[=*PASSWORD*]]
 [**-u**|**--username**[=*USERNAME*]]
-SERVER
+[SERVER]
 
 # DESCRIPTION
 Log in to a Docker Registry located on the specified
