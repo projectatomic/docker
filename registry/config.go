@@ -82,7 +82,7 @@ func IndexServerName() string {
 	// Set the default registry to docker.io unless there
 	// is one and only one registry entry in registries.conf.
 	// Note: docker.io is always added to the end of DefaultRegistries
-	if len(DefaultRegistries) < 2 {
+	if len(DefaultRegistries) != 2 {
 		return DefaultNamespace 
 	}
 	return DefaultRegistries[0]
