@@ -56,7 +56,8 @@ func loginV1(authConfig *types.AuthConfig, apiEndpoint APIEndpoint, userAgent st
 		return "", "", err
 	}
 	if resp.StatusCode == http.StatusOK {
-		return "Login Succeeded", "", nil
+		rtnMsg := fmt.Sprintf("Login Succeeded to %s", serverAddress)
+		return rtnMsg, "", nil
 	} else if resp.StatusCode == http.StatusUnauthorized {
 		if loginAgainstOfficialIndex {
 			return "", "", fmt.Errorf("Wrong login/password, please try again. Haven't got a Docker ID? Create one at https://hub.docker.com")
@@ -175,7 +176,8 @@ func loginV2(authConfig *types.AuthConfig, endpoint APIEndpoint, userAgent strin
 		return "", "", err
 	}
 
-	return "Login Succeeded", credentialAuthConfig.IdentityToken, nil
+	rtnMsg := fmt.Sprintf("Login Succeeded to %s", endpoint.URL)
+	return rtnMsg, credentialAuthConfig.IdentityToken, nil
 
 }
 

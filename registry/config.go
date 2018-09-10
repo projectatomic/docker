@@ -79,8 +79,10 @@ func init() {
 
 // IndexServerName returns the name of default index server.
 func IndexServerName() string {
-	if len(DefaultRegistries) < 1 {
-		return ""
+	// Set the default registry to docker.io unless there
+	// is one and only one registiry entry in registries.conf
+	if len(DefaultRegistries) != 1 {
+		return DefaultNamespace 
 	}
 	return DefaultRegistries[0]
 }
