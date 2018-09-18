@@ -60,6 +60,7 @@ func New(ctx logger.Context) (logger.Logger, error) {
 		"CONTAINER_ID_FULL": ctx.ContainerID,
 		"CONTAINER_NAME":    name,
 		"CONTAINER_TAG":     tag,
+		"SYSLOG_IDENTIFIER": tag,
 	}
 	extraAttrs := ctx.ExtraAttributes(strings.ToTitle)
 	for k, v := range extraAttrs {
