@@ -13,6 +13,7 @@ import (
 
 	"github.com/Sirupsen/logrus"
 	cimagedocker "github.com/containers/image/docker"
+	ciImage "github.com/containers/image/image"
 	"github.com/containers/image/signature"
 	"github.com/docker/distribution"
 	"github.com/docker/distribution/digest"
@@ -99,8 +100,13 @@ func (p *v2Puller) pullV2Repository(ctx context.Context, ref reference.Named) (e
 	var layersDownloaded bool
 	if !reference.IsNameOnly(ref) {
 		var err error
+		ciImage, closer, err := p.ciImage(ctx, ref)
+		if err != nil {
+			return err
+		}
+		defer closer.Close()
 		if p.config.SignatureCheck {
-			ref, err = p.checkTrusted(ctx, ref)
+			ref, err = p.checkTrusted(ref, ciImage)
 			if err != nil {
 				if err == cimagedocker.ErrV1NotSupported {
 					return fmt.Errorf("unable to pull from V1 Docker registries with image signature verification enabled. If you need to accept this risk and disable signature verification (for ALL images), run the docker daemon with --signature-enabled=false")
@@ -109,7 +115,7 @@ func (p *v2Puller) pullV2Repository(ctx context.Context, ref reference.Named) (e
 				return err
 			}
 		}
-		layersDownloaded, err = p.pullV2Tag(ctx, ref)
+		layersDownloaded, err = p.pullV2Tag(ctx, ref, ciImage)
 		if err != nil {
 			return err
 		}
@@ -135,8 +141,13 @@ func (p *v2Puller) pullV2Repository(ctx context.Context, ref reference.Named) (e
 			}
 			var ref reference.Named
 			ref = tagRef
+			ciImage, closer, err := p.ciImage(ctx, ref)
+			if err != nil {
+				return err
+			}
+			defer closer.Close()
 			if p.config.SignatureCheck {
-				trustedRef, err := p.checkTrusted(ctx, tagRef)
+				trustedRef, err := p.checkTrusted(tagRef, ciImage)
 				if err != nil {
 					p.originalRef = nil
 					if err == cimagedocker.ErrV1NotSupported {
@@ -146,7 +157,7 @@ func (p *v2Puller) pullV2Repository(ctx context.Context, ref reference.Named) (e
 				}
 				ref = trustedRef
 			}
-			pulledNew, err := p.pullV2Tag(ctx, ref)
+			pulledNew, err := p.pullV2Tag(ctx, ref, ciImage)
 			if err != nil {
 				// Since this is the pull-all-tags case, don't
 				// allow an error pulling a particular tag to
@@ -366,7 +377,7 @@ func (ld *v2LayerDescriptor) Registered(diffID layer.DiffID) {
 	ld.V2MetadataService.Add(diffID, metadata.V2Metadata{Digest: ld.digest, SourceRepository: ld.repoInfo.FullName()})
 }
 
-func (p *v2Puller) pullV2Tag(ctx context.Context, ref reference.Named) (tagUpdated bool, err error) {
+func (p *v2Puller) pullV2Tag(ctx context.Context, ref reference.Named, ciImage *ciImage.UnparsedImage) (tagUpdated bool, err error) {
 	manSvc, err := p.repo.Manifests(ctx)
 	if err != nil {
 		return false, err
@@ -442,6 +453,10 @@ func (p *v2Puller) pullV2Tag(ctx context.Context, ref reference.Named) (tagUpdat
 	}
 
 	progress.Message(p.config.ProgressOutput, "", "Digest: "+manifestDigest.String())
+
+	if err = p.storeSignatures(ctx, ciImage); err != nil {
+		return false, err
+	}
 
 	oldTagImageID, err := p.config.ReferenceStore.Get(ref)
 	if err == nil {

@@ -56,7 +56,7 @@ func (m *manifestOCI1) manifestMIMEType() string {
 // ConfigInfo returns a complete BlobInfo for the separate config object, or a BlobInfo{Digest:""} if there isn't a separate object.
 // Note that the config object may not exist in the underlying storage in the return value of UpdatedImage! Use ConfigBlob() below.
 func (m *manifestOCI1) ConfigInfo() types.BlobInfo {
-	return types.BlobInfo{Digest: m.ConfigDescriptor.Digest, Size: m.ConfigDescriptor.Size}
+	return types.BlobInfo{Digest: m.ConfigDescriptor.Digest, Size: m.ConfigDescriptor.Size, Annotations: m.ConfigDescriptor.Annotations}
 }
 
 // ConfigBlob returns the blob described by ConfigInfo, iff ConfigInfo().Digest != ""; nil otherwise.
@@ -109,9 +109,28 @@ func (m *manifestOCI1) OCIConfig() (*imgspecv1.Image, error) {
 func (m *manifestOCI1) LayerInfos() []types.BlobInfo {
 	blobs := []types.BlobInfo{}
 	for _, layer := range m.LayersDescriptors {
-		blobs = append(blobs, types.BlobInfo{Digest: layer.Digest, Size: layer.Size})
+		blobs = append(blobs, types.BlobInfo{Digest: layer.Digest, Size: layer.Size, Annotations: layer.Annotations, URLs: layer.URLs, MediaType: layer.MediaType})
 	}
 	return blobs
+}
+
+// LayerDiffIDs returns a list of DiffIDs (= digests of the UNCOMPRESSED versions, whether or not the downloadable blobs are compressed) of layers referenced by this image,
+// in order (the root layer first, and then successive layered layers), if available, or nil if not.
+// WARNING: The list may contain duplicates, and they are semantically relevant.
+func (m *manifestOCI1) LayerDiffIDs() ([]digest.Digest, error) {
+	configBytes, err := m.ConfigBlob()
+	if err != nil {
+		return nil, err
+	}
+	imageConfig := &imgspecv1.Image{}
+	if err := json.Unmarshal(configBytes, imageConfig); err != nil {
+		return nil, err
+	}
+	res := make([]digest.Digest, len(imageConfig.RootFS.DiffIDs))
+	for i, d := range imageConfig.RootFS.DiffIDs {
+		res[i] = digest.Digest(d)
+	}
+	return res, nil
 }
 
 // EmbeddedDockerReferenceConflicts whether a Docker reference embedded in the manifest, if any, conflicts with destination ref.
@@ -130,13 +149,16 @@ func (m *manifestOCI1) imageInspectInfo() (*types.ImageInspectInfo, error) {
 	if err := json.Unmarshal(config, v1); err != nil {
 		return nil, err
 	}
-	return &types.ImageInspectInfo{
+	i := &types.ImageInspectInfo{
 		DockerVersion: v1.DockerVersion,
 		Created:       v1.Created,
-		Labels:        v1.Config.Labels,
 		Architecture:  v1.Architecture,
 		Os:            v1.OS,
-	}, nil
+	}
+	if v1.Config != nil {
+		i.Labels = v1.Config.Labels
+	}
+	return i, nil
 }
 
 // UpdatedImageNeedsLayerDiffIDs returns true iff UpdatedImage(options) needs InformationOnly.LayerDiffIDs.
@@ -159,6 +181,8 @@ func (m *manifestOCI1) UpdatedImage(options types.ManifestUpdateOptions) (types.
 			copy.LayersDescriptors[i].MediaType = m.LayersDescriptors[i].MediaType
 			copy.LayersDescriptors[i].Digest = info.Digest
 			copy.LayersDescriptors[i].Size = info.Size
+			copy.LayersDescriptors[i].Annotations = info.Annotations
+			copy.LayersDescriptors[i].URLs = info.URLs
 		}
 	}
 	// Ignore options.EmbeddedDockerReference: it may be set when converting from schema1, but we really don't care.

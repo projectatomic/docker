@@ -11,6 +11,10 @@ func (pr *prSignedBaseLayer) isSignatureAuthorAccepted(image types.UnparsedImage
 	return sarUnknown, nil, nil
 }
 
+func (pr *prSignedBaseLayer) isImageAuthenticated(image types.UnparsedImage) (bool, error) {
+	return false, nil
+}
+
 func (pr *prSignedBaseLayer) isRunningImageAllowed(image types.UnparsedImage) (bool, error) {
 	// FIXME? Reject this at policy parsing time already?
 	logrus.Errorf("signedBaseLayer not implemented yet!")
