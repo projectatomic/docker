@@ -32,6 +32,7 @@ type Config struct {
 	ExecRoot             string                   `json:"exec-root,omitempty"`
 	RemappedRoot         string                   `json:"userns-remap,omitempty"`
 	Ulimits              map[string]*units.Ulimit `json:"default-ulimits,omitempty"`
+	PidsLimit            int64                    `json:"default-pids-limit"`
 	Runtimes             map[string]types.Runtime `json:"runtimes,omitempty"`
 	DefaultRuntime       string                   `json:"default-runtime,omitempty"`
 	OOMScoreAdjust       int                      `json:"oom-score-adjust,omitempty"`
@@ -91,11 +92,13 @@ func (config *Config) InstallFlags(cmd *flag.FlagSet, usageFn func(string) strin
 	cmd.StringVar(&config.CgroupParent, []string{"-cgroup-parent"}, "", usageFn("Set parent cgroup for all containers"))
 	cmd.StringVar(&config.RemappedRoot, []string{"-userns-remap"}, "", usageFn("User/Group setting for user namespaces"))
 	cmd.StringVar(&config.ContainerdAddr, []string{"-containerd"}, "", usageFn("Path to containerd socket"))
+
 	cmd.BoolVar(&config.LiveRestore, []string{"-live-restore"}, false, usageFn("Enable live restore of docker when containers are still running"))
 	config.Runtimes = make(map[string]types.Runtime)
 	cmd.Var(runconfigopts.NewNamedRuntimeOpt("runtimes", &config.Runtimes, stockRuntimeName), []string{"-add-runtime"}, usageFn("Register an additional OCI compatible runtime"))
 	cmd.StringVar(&config.DefaultRuntime, []string{"-default-runtime"}, stockRuntimeName, usageFn("Default OCI runtime for containers"))
 	cmd.IntVar(&config.OOMScoreAdjust, []string{"-oom-score-adjust"}, -500, usageFn("Set the oom_score_adj for the daemon"))
+	cmd.Int64Var(&config.PidsLimit, []string{"default-pids-limit"}, 4096, usageFn("Limit the number of processes each container is restricted to"))
 	cmd.BoolVar(&config.SigCheck, []string{"-signature-verification"}, true, usageFn("Check image's signatures on pull"))
 
 	config.attachExperimentalFlags(cmd, usageFn)
