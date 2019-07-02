@@ -174,6 +174,11 @@ func (daemon *Daemon) containerArchivePath(container *container.Container, path 
 		resolvedCtrDir = filepath.Join(container.BaseFS, resolvedCtrDir)
 	}
 
+	// Make sure we didn't leak outside of container.
+	if !strings.HasPrefix(resolvedCtrDir, container.BaseFS ) {
+		return nil, nil, fmt.Errorf("error targeted directory is not within the container %s", resolvedCtrDir)
+	}
+
 	data, err := chrootarchive.Tar(resolvedPath, opts, resolvedCtrDir)
 	if err != nil {
 		return nil, nil, err
