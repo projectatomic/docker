@@ -455,9 +455,6 @@ func (d *Driver) getLower(parent string) (string, error) {
 		parentLowers := strings.Split(string(parentLower), ":")
 		lowers = append(lowers, parentLowers...)
 	}
-	if len(lowers) > maxDepth {
-		return "", errors.New("max depth exceeded")
-	}
 	return strings.Join(lowers, ":"), nil
 }
 
@@ -529,6 +526,10 @@ func (d *Driver) Get(id string, mountLabel string) (s string, err error) {
 
 	workDir := path.Join(dir, "work")
 	splitLowers := strings.Split(string(lowers), ":")
+	if len(splitLowers) >= maxDepth {
+		return "", errors.New("max depth exceeded")
+	}
+
 	absLowers := make([]string, len(splitLowers))
 	for i, s := range splitLowers {
 		absLowers[i] = path.Join(d.home, s)

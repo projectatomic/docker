@@ -263,10 +263,6 @@ func (ls *layerStore) registerWithDescriptor(ts io.Reader, parent ChainID, descr
 				ls.layerL.Unlock()
 			}
 		}()
-		if p.depth() >= maxLayerDepth {
-			err = ErrMaxDepthExceeded
-			return nil, err
-		}
 	}
 
 	// Create new roLayer
