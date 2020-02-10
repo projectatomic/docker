@@ -150,6 +150,7 @@ func (daemon *Daemon) containerStart(container *container.Container, checkpoint 
 	if err != nil {
 		return err
 	}
+	container.Spec = spec
 
 	createOptions, err := daemon.getLibcontainerdCreateOptions(container)
 	if err != nil {

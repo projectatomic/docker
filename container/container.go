@@ -43,6 +43,7 @@ import (
 	"github.com/docker/libnetwork/types"
 	agentexec "github.com/docker/swarmkit/agent/exec"
 	"github.com/opencontainers/runc/libcontainer/label"
+	specs "github.com/opencontainers/runtime-spec/specs-go"
 )
 
 const configFileName = "config.v2.json"
@@ -85,6 +86,7 @@ type CommonContainer struct {
 	HasBeenManuallyStopped bool // used for unless-stopped restart policy
 	MountPoints            map[string]*volume.MountPoint
 	HostConfig             *containertypes.HostConfig `json:"-"` // do not serialize the host config in the json, otherwise we'll make the container unportable
+	Spec                   *specs.Spec                `json:"-"` // ditto
 	ExecCommands           *exec.Store                `json:"-"`
 	SecretStore            agentexec.SecretGetter     `json:"-"`
 	SecretReferences       []*swarmtypes.SecretReference
@@ -313,7 +315,7 @@ func (container *Container) StartLogger(cfg containertypes.LogConfig) (logger.Lo
 	if err != nil {
 		return nil, fmt.Errorf("Failed to get logging factory: %v", err)
 	}
-	ctx := logger.Context{
+	cctx := logger.CommonContext{
 		Config:              cfg.Config,
 		ContainerID:         container.ID,
 		ContainerName:       container.Name,
@@ -326,6 +328,7 @@ func (container *Container) StartLogger(cfg containertypes.LogConfig) (logger.Lo
 		ContainerLabels:     container.Config.Labels,
 		DaemonName:          "docker",
 	}
+	ctx := configurePlatformLogger(cctx, container)
 
 	// Set logging file for "json-logger"
 	if cfg.Type == jsonfilelog.Name {

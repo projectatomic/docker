@@ -164,6 +164,7 @@ import (
 
 func (s *journald) Close() error {
 	s.readers.mu.Lock()
+	s.closeWriter()
 	for reader := range s.readers.readers {
 		reader.Close()
 	}
