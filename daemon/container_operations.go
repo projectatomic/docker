@@ -956,6 +956,9 @@ func (daemon *Daemon) ConnectToNetwork(container *container.Container, idOrName 
 	if endpointConfig == nil {
 		endpointConfig = &networktypes.EndpointSettings{}
 	}
+	container.Lock()
+	defer container.Unlock()
+
 	if !container.Running {
 		if container.RemovalInProgress || container.Dead {
 			return errRemovalContainer(container.ID)
@@ -978,7 +981,7 @@ func (daemon *Daemon) ConnectToNetwork(container *container.Container, idOrName 
 			return err
 		}
 	}
-	if err := container.ToDiskLocking(); err != nil {
+	if err := container.ToDisk(); err != nil {
 		return fmt.Errorf("Error saving container to disk: %v", err)
 	}
 	return nil
@@ -987,6 +990,9 @@ func (daemon *Daemon) ConnectToNetwork(container *container.Container, idOrName 
 // DisconnectFromNetwork disconnects container from network n.
 func (daemon *Daemon) DisconnectFromNetwork(container *container.Container, networkName string, force bool) error {
 	n, err := daemon.FindNetwork(networkName)
+	container.Lock()
+	defer container.Unlock()
+
 	if !container.Running || (err != nil && force) {
 		if container.RemovalInProgress || container.Dead {
 			return errRemovalContainer(container.ID)
@@ -1014,7 +1020,7 @@ func (daemon *Daemon) DisconnectFromNetwork(container *container.Container, netw
 		return err
 	}
 
-	if err := container.ToDiskLocking(); err != nil {
+	if err := container.ToDisk(); err != nil {
 		return fmt.Errorf("Error saving container to disk: %v", err)
 	}
 
