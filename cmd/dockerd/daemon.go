@@ -274,10 +274,21 @@ func (cli *DaemonCli) start(opts daemonOptions) (err error) {
 	cli.TrustKeyPath = opts.common.TrustKey
 
 	registryService := registry.NewService(cli.Config.ServiceOptions)
-	containerdRemote, err := libcontainerd.New(cli.getLibcontainerdRoot(), cli.getPlatformRemoteOptions()...)
+
+	// libcontainerd.New add hook
+	hook := func() {
+		if cli.d == nil {
+			return
+		}
+		for _, c := range cli.d.List() {
+			c.CheckProcessIsRunning()
+		}
+	}
+	containerdRemote, err := libcontainerd.New(cli.getLibcontainerdRoot(), hook, cli.getPlatformRemoteOptions()...)
 	if err != nil {
 		return err
 	}
+
 	signal.Trap(func() {
 		cli.stop()
 		<-stopc // wait for daemonCli.start() to return

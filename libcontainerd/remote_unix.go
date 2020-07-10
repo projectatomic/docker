@@ -61,10 +61,11 @@ type remote struct {
 	oomScore              int
 	maxHealthCheckRetries int
 	restoreFromTimestamp  *timestamp.Timestamp
+	handleContainerdHook  func()
 }
 
 // New creates a fresh instance of libcontainerd remote.
-func New(stateDir string, options ...RemoteOption) (_ Remote, err error) {
+func New(stateDir string, hook func(), options ...RemoteOption) (_ Remote, err error) {
 	defer func() {
 		if err != nil {
 			err = fmt.Errorf("Failed to connect to containerd. Please make sure containerd is installed in your PATH or you have specified the correct address. Got error: %v", err)
@@ -75,6 +76,7 @@ func New(stateDir string, options ...RemoteOption) (_ Remote, err error) {
 		daemonPid:   -1,
 		eventTsPath: filepath.Join(stateDir, eventTimestampFilename),
 	}
+	r.handleContainerdHook = hook
 	for _, option := range options {
 		if err := option.Apply(r); err != nil {
 			return nil, err
@@ -117,7 +119,6 @@ func New(stateDir string, options ...RemoteOption) (_ Remote, err error) {
 		logrus.Errorf("libcontainerd: failed to convert timestamp: %q", err)
 	}
 	r.restoreFromTimestamp = tsp
-
 	go r.handleConnectionChange()
 
 	if err := r.startEventsMonitor(); err != nil {
@@ -179,6 +180,10 @@ func (r *remote) handleConnectionChange() {
 				if err := r.runContainerdDaemon(); err != nil { //FIXME: Handle error
 					logrus.Errorf("libcontainerd: error restarting containerd: %v", err)
 				}
+				// Workaround to fix inconsistency stopped status
+				go func() {
+					r.handleContainerdHook()
+				}()
 				continue
 			}
 		}

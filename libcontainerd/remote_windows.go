@@ -26,7 +26,7 @@ func (r *remote) UpdateOptions(opts ...RemoteOption) error {
 
 // New creates a fresh instance of libcontainerd remote. On Windows,
 // this is not used as there is no remote containerd process.
-func New(_ string, _ ...RemoteOption) (Remote, error) {
+func New(_ string, _ func(), _ ...RemoteOption) (Remote, error) {
 	return &remote{}, nil
 }
 

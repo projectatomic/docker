@@ -8,6 +8,7 @@ import (
 	"golang.org/x/net/context"
 
 	"github.com/docker/docker/api/types"
+	"github.com/docker/docker/utils"
 	"github.com/docker/go-units"
 )
 
@@ -228,6 +229,17 @@ func (s *State) IsRunning() bool {
 	res := s.Running
 	s.Unlock()
 	return res
+}
+
+// CheckProcessIsRunning check the the process of running container is still performed.
+func (s *State) CheckProcessIsRunning() {
+	if !s.IsRunning() {
+		return
+	}
+	if !utils.IsProcessAlive(s.Pid) {
+		// TODO: force set exitcode:1, better to define new exitcode
+		s.SetStopped(&ExitStatus{ExitCode: 1})
+	}
 }
 
 // GetPID holds the process id of a container.
