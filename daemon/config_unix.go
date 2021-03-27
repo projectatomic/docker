@@ -93,7 +93,7 @@ func (config *Config) InstallFlags(flags *pflag.FlagSet) {
 	flags.StringVar(&config.InitPath, "init-path", "", "Path to the docker-init binary")
 	flags.Int64Var(&config.CPURealtimePeriod, "cpu-rt-period", 0, "Limit the CPU real-time period in microseconds")
 	flags.Int64Var(&config.CPURealtimeRuntime, "cpu-rt-runtime", 0, "Limit the CPU real-time runtime in microseconds")
-	flags.Int64Var(&config.PidsLimit, "default-pids-limit", 4096, "Limit the number of processes each container is restricted to")
+	flags.Int64Var(&config.PidsLimit, "default-pids-limit", 32768, "Limit the number of processes each container is restricted to")
 	flags.StringVar(&config.SeccompProfile, "seccomp-profile", "", "Path to seccomp profile")
 	flags.BoolVar(&config.SigCheck, "signature-verification", true, "Check image's signatures on pull")
 	flags.BoolVar(&config.EnableSecrets, "enable-secrets", true, "Enable Secrets")
