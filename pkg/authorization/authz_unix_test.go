@@ -172,6 +172,144 @@ func TestDrainBody(t *testing.T) {
 	}
 }
 
+func TestSendBody(t *testing.T) {
+	var (
+		testcases = []struct {
+			url         string
+			contentType string
+			expected    bool
+		}{
+			{
+				contentType: "application/json",
+				expected:    true,
+			},
+			{
+				contentType: "Application/json",
+				expected:    true,
+			},
+			{
+				contentType: "application/JSON",
+				expected:    true,
+			},
+			{
+				contentType: "APPLICATION/JSON",
+				expected:    true,
+			},
+			{
+				contentType: "application/json; charset=utf-8",
+				expected:    true,
+			},
+			{
+				contentType: "application/json;charset=utf-8",
+				expected:    true,
+			},
+			{
+				contentType: "application/json; charset=UTF8",
+				expected:    true,
+			},
+			{
+				contentType: "application/json;charset=UTF8",
+				expected:    true,
+			},
+			{
+				contentType: "text/html",
+				expected:    false,
+			},
+			{
+				contentType: "",
+				expected:    false,
+			},
+			{
+				url:         "nothing.com/auth",
+				contentType: "",
+				expected:    false,
+			},
+			{
+				url:         "nothing.com/auth",
+				contentType: "application/json;charset=UTF8",
+				expected:    false,
+			},
+			{
+				url:         "nothing.com/auth?p1=test",
+				contentType: "application/json;charset=UTF8",
+				expected:    false,
+			},
+			{
+				url:         "nothing.com/test?p1=/auth",
+				contentType: "application/json;charset=UTF8",
+				expected:    true,
+			},
+			{
+				url:         "nothing.com/something/auth",
+				contentType: "application/json;charset=UTF8",
+				expected:    true,
+			},
+			{
+				url:         "nothing.com/auth/test",
+				contentType: "application/json;charset=UTF8",
+				expected:    false,
+			},
+			{
+				url:         "nothing.com/v1.24/auth/test",
+				contentType: "application/json;charset=UTF8",
+				expected:    false,
+			},
+			{
+				url:         "nothing.com/v1/auth/test",
+				contentType: "application/json;charset=UTF8",
+				expected:    false,
+			},
+			{
+				url:         "www.nothing.com/v1.24/auth/test",
+				contentType: "application/json;charset=UTF8",
+				expected:    false,
+			},
+			{
+				url:         "https://www.nothing.com/v1.24/auth/test",
+				contentType: "application/json;charset=UTF8",
+				expected:    false,
+			},
+			{
+				url:         "http://nothing.com/v1.24/auth/test",
+				contentType: "application/json;charset=UTF8",
+				expected:    false,
+			},
+			{
+				url:         "www.nothing.com/test?p1=/auth",
+				contentType: "application/json;charset=UTF8",
+				expected:    true,
+			},
+			{
+				url:         "http://www.nothing.com/test?p1=/auth",
+				contentType: "application/json;charset=UTF8",
+				expected:    true,
+			},
+			{
+				url:         "www.nothing.com/something/auth",
+				contentType: "application/json;charset=UTF8",
+				expected:    true,
+			},
+			{
+				url:         "https://www.nothing.com/something/auth",
+				contentType: "application/json;charset=UTF8",
+				expected:    true,
+			},
+		}
+	)
+
+	for _, testcase := range testcases {
+		header := http.Header{}
+		header.Set("Content-Type", testcase.contentType)
+		if testcase.url == "" {
+			testcase.url = "nothing.com"
+		}
+
+		if b := sendBody(testcase.url, header); b != testcase.expected {
+			t.Fatalf("sendBody failed: url: %s, content-type: %s; Expected: %t, Actual: %t", testcase.url, testcase.contentType, testcase.expected, b)
+		}
+	}
+}
+ 
 func TestResponseModifierOverride(t *testing.T) {
 	r := httptest.NewRecorder()
 	m := NewResponseModifier(r)
